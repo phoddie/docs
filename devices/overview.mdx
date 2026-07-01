@@ -1,0 +1,90 @@
+---
+title: "All Microcontroller Families Supported by Moddable SDK"
+sidebarTitle: "Overview"
+description: "Explore every microcontroller family supported by the Moddable SDK, from ESP32 and nRF52 to Raspberry Pi Pico and Zephyr-based boards."
+---
+
+The Moddable SDK runs JavaScript applications on a wide range of microcontrollers. Whether you are prototyping with a development kit or shipping a finished product, you can target the same codebase at multiple hardware families by changing a single build flag. The sections below introduce each supported family, highlight Moddable's own development boards, and show you the general steps to build and flash any target.
+
+## Supported families
+
+<CardGroup cols={2}>
+  <Card title="ESP32" icon="microchip" href="/devices/esp32">
+    Wi-Fi and Bluetooth in one chip. Covers the full ESP32 line including ESP32-S2, ESP32-S3, ESP32-C3, and ESP32-H2 subvariants. Popular boards include Moddable Two, Moddable Six, and M5Stack.
+  </Card>
+  <Card title="ESP8266" icon="microchip" href="/devices/esp8266">
+    A proven Wi-Fi microcontroller with a smaller resource footprint. Supported boards include Moddable One, Moddable Three, and NodeMCU.
+  </Card>
+  <Card title="nRF52" icon="microchip" href="/devices/nrf52">
+    Nordic's ARM Cortex-M4 family with BLE 5.0 and excellent low-power characteristics. Supported boards include Moddable Four, Nordic DK, SparkFun, Adafruit, Seeed XIAO, and Makerdiary MDK.
+  </Card>
+  <Card title="Raspberry Pi Pico" icon="microchip" href="/devices/pico">
+    An affordable RP2040-based platform with native USB. Supported boards include Pico W, Pimoroni Pico Display, LILYGO T-Display S3, and SparkFun Pro Micro RP2040.
+  </Card>
+  <Card title="Zephyr" icon="microchip" href="/devices/zephyr">
+    Build on any board supported by the Zephyr RTOS. The Moddable SDK Zephyr port adds Ethernet, BLE central, and file storage capabilities.
+  </Card>
+  <Card title="Simulator" icon="display" href="/debugging/simulator">
+    Run and debug your application on macOS, Linux, or Windows without any hardware. The simulator is the fastest way to iterate during development.
+  </Card>
+</CardGroup>
+
+## Moddable development boards
+
+Moddable produces its own line of development boards designed to work out of the box with the Moddable SDK. Each board is fully open-hardware.
+
+| Board | Chip | Connectivity | Display |
+|---|---|---|---|
+| **Moddable One** | ESP8266 | Wi-Fi | 1.8" TFT |
+| **Moddable Two** | ESP32 | Wi-Fi + BT | 2.4" IPS |
+| **Moddable Three** | ESP8266 | Wi-Fi | ePaper |
+| **Moddable Four** | nRF52840 | BLE | ePaper |
+| **Moddable Six** | ESP32-S3 | Wi-Fi + BT | 2.4" QVGA, multitouch |
+
+**Moddable Six** is the current flagship board. It adds a built-in microphone, stereo amplifier, and capacitive multitouch to the familiar form factor — all for $29.99.
+
+## General build workflow
+
+Every target follows the same four-step process. Refer to the platform-specific page for the exact SDK and toolchain you need to install in step 2.
+
+<Steps>
+  <Step title="Install the Moddable SDK tools">
+    Follow the [Getting Started guide](/getting-started) to install `mcconfig`, `xsbug`, and the rest of the Moddable toolchain on your host machine.
+  </Step>
+  <Step title="Install the platform SDK">
+    Each microcontroller family requires its own vendor SDK and toolchain. For example, ESP32 targets need ESP-IDF, nRF52 targets need the nRF5 SDK, and Pico targets need the Pico C SDK.
+  </Step>
+  <Step title="Connect the device via USB">
+    Plug your board into your development machine. Confirm the serial port appears (e.g., `/dev/cu.usbserial-*` on macOS or `/dev/ttyUSB0` on Linux).
+  </Step>
+  <Step title="Build and flash">
+    Run `mcconfig` with the `-d` (debug), `-m` (make), and `-p` (platform) flags:
+
+    ```bash
+    mcconfig -d -m -p <platform>/<subplatform>
+    ```
+
+    Replace `<platform>/<subplatform>` with the target identifier for your board — for example, `esp32/moddable_two` or `nrf52/moddable_four`.
+  </Step>
+</Steps>
+
+<Tip>
+  Start with the simulator (`-p mac`, `-p lin`, or `-p win`) while you write your application logic. Switch to a hardware target only when you need to test device-specific features such as GPIO, display, or radio.
+</Tip>
+
+## Family comparison
+
+Use this table to choose a family based on your project requirements.
+
+| | ESP32 | ESP8266 | nRF52 | Pico | Zephyr |
+|---|---|---|---|---|---|
+| **Wi-Fi** | ✅ | ✅ | ❌ | ✅ (Pico W) | Board-dependent |
+| **BLE** | ✅ | ❌ | ✅ | ❌ | Board-dependent |
+| **RAM** | 520 KB+ | ~45 KB free | 256 KB | 264 KB | Board-dependent |
+| **Low power** | Good | Moderate | Excellent | Good | Board-dependent |
+| **USB** | Some variants | ❌ | Some boards | ✅ native | Board-dependent |
+| **Cost** | Low | Very low | Low–mid | Very low | Varies |
+
+<Note>
+  All families share the same JavaScript APIs and manifest system. Code you write for one target is portable to another with only minor platform-specific adjustments.
+</Note>

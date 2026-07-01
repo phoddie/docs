@@ -1,0 +1,138 @@
+---
+title: "Raspberry Pi Pico Developer Guide for Moddable SDK"
+sidebarTitle: "Pico"
+description: "Install the Pico C SDK and ARM toolchain, then build and flash Moddable SDK apps for Pico W, Pimoroni, LILYGO T-Display, and other RP2040 boards."
+---
+
+The Raspberry Pi Pico and its RP2040 microcontroller offer a compelling combination of price, performance, and native USB — making them a popular starting point for embedded JavaScript projects. The Moddable SDK supports the standard Pico, the Wi-Fi-enabled Pico W, and a selection of RP2040-based boards from Pimoroni, LILYGO, Adafruit, and SparkFun. Flashing is intentionally simple: drag and drop a `.uf2` file over USB.
+
+## Supported boards
+
+| Board | Platform identifier | Notes |
+|---|---|---|
+| Raspberry Pi Pico | `pico` | Baseline RP2040 board |
+| Raspberry Pi Pico W | `pico/pico_w` | Adds CYW43439 Wi-Fi + BT |
+| Pimoroni Pico Display Pack | `pico/pimoroni_pico_display` | 1.14" IPS display |
+| LILYGO T-Display | `pico/lilygo_t_display` | 1.14" display, USB-C |
+| Adafruit QT Py RP2040 | See Moddable SDK docs | STEMMA QT connector |
+| SparkFun Pro Micro RP2040 | See Moddable SDK docs | USB-C, compact |
+
+## Prerequisites
+
+<Steps>
+  <Step title="Install the Moddable SDK tools">
+    Follow the [Getting Started guide](/getting-started) to install `mcconfig` and the Moddable toolchain before continuing.
+  </Step>
+  <Step title="Install the Pico C SDK">
+    Clone the official Pico SDK from Raspberry Pi:
+
+    ```bash
+    git clone --recurse-submodules https://github.com/raspberrypi/pico-sdk ~/pico/pico-sdk
+    ```
+
+    Full setup instructions are at [https://github.com/raspberrypi/pico-sdk](https://github.com/raspberrypi/pico-sdk).
+  </Step>
+  <Step title="Install the ARM GNU Toolchain">
+    Download `arm-none-eabi-gcc` from [https://developer.arm.com/tools-and-software/open-source-software/developer-tools/gnu-toolchain/gnu-rm](https://developer.arm.com/tools-and-software/open-source-software/developer-tools/gnu-toolchain/gnu-rm) and add the `bin` directory to your `PATH`.
+
+    Verify the installation:
+
+    ```bash
+    arm-none-eabi-gcc --version
+    ```
+  </Step>
+  <Step title="Install CMake 3.13 or newer">
+    The Pico C SDK build system requires CMake:
+
+    <Tabs>
+      <Tab title="macOS">
+        ```bash
+        brew install cmake
+        ```
+      </Tab>
+      <Tab title="Linux (Debian / Ubuntu)">
+        ```bash
+        sudo apt install cmake
+        ```
+      </Tab>
+      <Tab title="Windows">
+        Download the installer from [https://cmake.org/download/](https://cmake.org/download/).
+      </Tab>
+    </Tabs>
+
+    Verify the version:
+
+    ```bash
+    cmake --version
+    ```
+  </Step>
+  <Step title="Set environment variables">
+    Add the following to your shell profile:
+
+    ```bash
+    export PICO_SDK_PATH=~/pico/pico-sdk
+    export PICO_GCC_ROOT=/usr
+    ```
+
+    Set `PICO_GCC_ROOT` to the directory that contains the `bin/arm-none-eabi-gcc` binary. On macOS with a manual toolchain install, this is typically the toolchain root rather than `/usr`. Reload your profile or open a new terminal after saving.
+  </Step>
+</Steps>
+
+## Build
+
+Run `mcconfig` with the `-d`, `-m`, and `-p` flags followed by your board's platform identifier:
+
+```bash
+# Standard Pico
+mcconfig -d -m -p pico
+
+# Pico W (Wi-Fi)
+mcconfig -d -m -p pico/pico_w
+
+# Pimoroni Pico Display Pack
+mcconfig -d -m -p pico/pimoroni_pico_display
+
+# LILYGO T-Display
+mcconfig -d -m -p pico/lilygo_t_display
+```
+
+The build produces a `.uf2` file in the output directory.
+
+## Flashing
+
+The Pico uses a USB mass storage bootloader — no flash tool required.
+
+<Steps>
+  <Step title="Enter bootloader mode">
+    Hold the **BOOTSEL** button on the Pico while plugging it into your computer's USB port, then release the button. The Pico mounts as a USB drive named `RPI-RP2`.
+  </Step>
+  <Step title="Copy the firmware">
+    When you run `mcconfig` without a device already connected in normal mode, the build copies the `.uf2` file to the mounted drive automatically. The Pico reboots and runs your application.
+
+    You can also copy the file manually:
+
+    ```bash
+    cp build/output/app.uf2 /Volumes/RPI-RP2/
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  When you run `mcconfig` with the `-d` flag and xsbug is open, the application connects to the debugger automatically over USB as soon as it boots. You do not need to hold BOOTSEL for subsequent debug builds if the device is already running a Moddable firmware image — simply trigger a reset from xsbug.
+</Note>
+
+## Wi-Fi on Pico W
+
+The Pico W adds a CYW43439 chip for Wi-Fi and Bluetooth. Use the `pico/pico_w` platform identifier to enable the Wi-Fi driver. Pass credentials at build time:
+
+```bash
+mcconfig -d -m -p pico/pico_w ssid="MyNetwork" password="secret"
+```
+
+<Warning>
+  Wi-Fi is only available on the Pico W. Using `pico/pico_w` with a standard Pico will not work.
+</Warning>
+
+<Tip>
+  The RP2040's dual-core architecture can be useful for offloading work to the second core. The Moddable SDK runs on core 0; refer to the Pico SDK documentation if you want to run native C code on core 1 alongside your JavaScript application.
+</Tip>

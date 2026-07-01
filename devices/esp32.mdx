@@ -1,0 +1,125 @@
+---
+title: "ESP32 Developer Guide for the Moddable JavaScript SDK"
+sidebarTitle: "ESP32"
+description: "Set up ESP-IDF, configure your environment, and build Moddable SDK apps for ESP32, ESP32-S2, ESP32-S3, ESP32-C3, and ESP32-H2 boards."
+---
+
+The ESP32 family from Espressif is the most widely used target in the Moddable SDK ecosystem. It combines a dual-core 240 MHz processor with integrated Wi-Fi and Bluetooth, making it a strong choice for connected IoT applications. Moddable supports the full ESP32 line — including the S2, S3, C3, and H2 subvariants — and maintains dedicated configurations for popular boards like the Moddable Two, Moddable Six, and M5Stack.
+
+## Supported boards
+
+| Board | Platform identifier | Notes |
+|---|---|---|
+| Generic ESP32 | `esp32` | Any ESP32 module |
+| Moddable Two | `esp32/moddable_two` | 2.4" IPS display, Wi-Fi + BT |
+| Moddable Six | `esp32s3/moddable_six` | ESP32-S3, 2.4" QVGA, multitouch, microphone |
+| M5Stack Core | `esp32/m5stack` | Integrated display and battery |
+| M5Stack Core2 | `esp32/m5stack_core2` | Touch screen variant |
+| M5Atom Lite | `esp32/m5atom_lite` | Compact form factor |
+| M5Atom Matrix | `esp32/m5atom_matrix` | LED matrix display |
+| NodeMCU ESP32 | `esp32/nodemcu` | Common dev board |
+| Moddable Zero (S2) | `esp32s2/moddable_zero` | ESP32-S2, USB OTG |
+| Kaluga 1 (S3) | `esp32s3/kaluga_1` | ESP32-S3 dev kit |
+| ESP32-C3 | `esp32c3` | RISC-V core, Wi-Fi + BLE |
+| ESP32-H2 | `esp32h2` | IEEE 802.15.4 + BLE |
+
+## Prerequisites
+
+Before you build for any ESP32 target you need the Moddable SDK tools and the Espressif ESP-IDF installed on your host machine.
+
+<Steps>
+  <Step title="Install the Moddable SDK tools">
+    Follow the [Getting Started guide](/getting-started) to install `mcconfig` and the Moddable toolchain. Return here once that is complete.
+  </Step>
+  <Step title="Install ESP-IDF">
+    ESP-IDF 5.2.x or newer is recommended.
+
+    <Tabs>
+      <Tab title="macOS / Linux">
+        Follow the official Espressif guide at [https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/). The guide installs the Xtensa toolchain alongside ESP-IDF.
+      </Tab>
+      <Tab title="Windows">
+        Download and run the **ESP-IDF Windows Installer** from the Espressif get-started page. The installer sets up the toolchain and all Python dependencies automatically.
+      </Tab>
+    </Tabs>
+  </Step>
+  <Step title="Set environment variables">
+    Add the following to your shell profile (`.zshrc`, `.bashrc`, etc.) so every new terminal session picks up ESP-IDF:
+
+    ```bash
+    export IDF_PATH=~/esp/esp-idf
+    . $IDF_PATH/export.sh
+    ```
+
+    Reload your profile or open a new terminal, then verify the installation:
+
+    ```bash
+    idf.py --version
+    ```
+  </Step>
+  <Step title="Connect the board">
+    Plug your ESP32 board into a USB port. On macOS the device appears as `/dev/cu.usbserial-*` or `/dev/cu.SLAB_USBtoUART`. On Linux it appears as `/dev/ttyUSB0` or `/dev/ttyACM0`.
+  </Step>
+</Steps>
+
+<Note>
+  The Xtensa toolchain (`xtensa-esp32-elf-gcc`) is bundled with ESP-IDF. You do not need to install it separately.
+</Note>
+
+## Build and flash
+
+Use `mcconfig` with the `-d` (debug), `-m` (make), and `-p` (platform) flags. Select the platform identifier that matches your board from the table above.
+
+```bash
+# Generic ESP32
+mcconfig -d -m -p esp32
+
+# Moddable Two
+mcconfig -d -m -p esp32/moddable_two
+
+# Moddable Six (ESP32-S3)
+mcconfig -d -m -p esp32s3/moddable_six
+
+# M5Stack
+mcconfig -d -m -p esp32/m5stack
+```
+
+### Providing Wi-Fi credentials at build time
+
+Pass your network credentials as key–value pairs after the platform flag. The SDK bakes them into the build so your app can connect at startup.
+
+```bash
+mcconfig -d -m -p esp32 ssid="MyNetwork" password="secret"
+```
+
+<Warning>
+  Do not commit builds that contain hardcoded Wi-Fi credentials to source control. Use this approach for local development only; prefer a provisioning flow for production firmware.
+</Warning>
+
+## Debugging with xsbug
+
+When you run `mcconfig` with the `-d` flag, the device connects to **xsbug** — the Moddable JavaScript debugger — over the USB serial port as soon as it boots. Open xsbug before flashing to catch startup output from the first line of your application.
+
+## Serial port troubleshooting
+
+If `mcconfig` cannot find your device, check the following:
+
+- **macOS:** Make sure the Silicon Labs CP210x or CH340 USB-to-UART driver is installed for your specific board.
+- **Linux:** Add your user to the `dialout` group: `sudo usermod -aG dialout $USER`, then log out and back in.
+- **All platforms:** Try a different USB cable — many cables are charge-only and lack data lines.
+
+<Tip>
+  Run `ls /dev/cu.*` (macOS) or `ls /dev/tty*` (Linux) before and after plugging in the board to identify the correct port.
+</Tip>
+
+## Subvariant notes
+
+| Subvariant | Core | Key difference |
+|---|---|---|
+| ESP32 | Xtensa LX6 (dual) | Original; widest board support |
+| ESP32-S2 | Xtensa LX7 (single) | USB OTG; no BT classic |
+| ESP32-S3 | Xtensa LX7 (dual) | Larger RAM; AI extensions |
+| ESP32-C3 | RISC-V | Lower cost; BLE 5.0 |
+| ESP32-H2 | RISC-V | IEEE 802.15.4 (Thread/Zigbee) + BLE |
+
+Each subvariant uses a separate platform prefix (`esp32s2/`, `esp32s3/`, `esp32c3`, `esp32h2`). Make sure you use the correct prefix for your chip — using the wrong one produces a build that will not run.

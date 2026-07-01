@@ -1,0 +1,165 @@
+---
+title: "Build and Run Your First App with the Moddable SDK"
+sidebarTitle: "First App"
+description: "Learn how mcconfig works, explore the helloworld project structure, and discover where to find over 150 example apps included with the Moddable SDK."
+---
+
+Once you have installed the Moddable SDK on your platform, you build and run applications using the `mcconfig` command-line tool. This page walks you through the helloworld example — the simplest possible Moddable app — and shows you how to move from the simulator to real hardware.
+
+## The `mcconfig` command
+
+Every Moddable build starts with `mcconfig`. It reads a project's `manifest.json`, compiles your JavaScript with XS, generates the native glue code, and invokes the platform's make toolchain — all in one command.
+
+The flags you will use most often are:
+
+| Flag | Meaning |
+|------|---------|
+| `-d` | Debug build — enables the xsbug connection so you can set breakpoints and inspect variables |
+| `-m` | Run `make` immediately after generating the build files |
+| `-p <platform>` | Target platform: `mac`, `win`, or `lin` for the simulator; `esp32`, `esp8266`, `nrf52`, `pico`, and others for hardware |
+
+A typical simulator invocation looks like this:
+
+<CodeGroup>
+  ```bash macOS
+  mcconfig -d -m -p mac
+  ```
+
+  ```cmd Windows
+  mcconfig -d -m -p win
+  ```
+
+  ```bash Linux
+  mcconfig -d -m -p lin
+  ```
+</CodeGroup>
+
+## Run helloworld
+
+The helloworld example is included in the Moddable repository. It prints a single line to the xsbug console and is the canonical way to verify your installation.
+
+<Steps>
+  <Step title="Start xsbug">
+    Launch the xsbug debugger before you build. `mcconfig -d` will attempt to connect to a running xsbug instance; if none is found, debug output will be lost.
+
+    <CodeGroup>
+      ```bash macOS
+      open ${MODDABLE}/build/bin/mac/release/xsbug.app
+      ```
+
+      ```cmd Windows
+      xsbug
+      ```
+
+      ```bash Linux
+      xsbug
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Navigate to the helloworld directory">
+    <CodeGroup>
+      ```bash macOS / Linux
+      cd $MODDABLE/examples/helloworld
+      ```
+
+      ```cmd Windows
+      cd %MODDABLE%\examples\helloworld
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Build and run">
+    Run `mcconfig` for your platform:
+
+    <CodeGroup>
+      ```bash macOS
+      mcconfig -d -m -p mac
+      ```
+
+      ```cmd Windows
+      mcconfig -d -m -p win
+      ```
+
+      ```bash Linux
+      mcconfig -d -m -p lin
+      ```
+    </CodeGroup>
+
+    The simulator window opens and `Hello, World` appears in the xsbug console.
+  </Step>
+</Steps>
+
+## Understand the project structure
+
+Every Moddable application — no matter how large — has the same two required files:
+
+```
+helloworld/
+  main.js          # Application entry point
+  manifest.json    # Project build configuration
+```
+
+### main.js
+
+The entry point for helloworld is intentionally minimal:
+
+```javascript
+debugger;
+trace("Hello, World\n");
+```
+
+- `debugger` pauses execution at this line when xsbug is connected, giving you a chance to inspect the initial state before the app continues.
+- `trace()` writes a string to the xsbug console. It works like `console.log` and is the primary logging tool for Moddable apps.
+
+### manifest.json
+
+The manifest describes which modules to compile and which base configuration to inherit:
+
+```json
+{
+  "include": ["$(MODDABLE)/examples/manifest_base.json"],
+  "modules": {
+    "*": "./main"
+  }
+}
+```
+
+- `include` pulls in a shared base manifest that configures the XS engine and standard libraries.
+- `modules` maps the module identifier `*` (the app's default module) to `./main`, pointing `mcconfig` at `main.js`.
+
+<Note>
+  `$(MODDABLE)` inside a manifest is resolved from the `MODDABLE` environment variable at build time. It is distinct from the shell variable `$MODDABLE` — the parentheses form is specific to Moddable manifests.
+</Note>
+
+## Explore the example library
+
+The Moddable SDK ships with over 150 example applications in `$MODDABLE/examples/`. They are organized into categories that map to the major SDK subsystems:
+
+| Directory | What you will find |
+|-----------|-------------------|
+| `base/` | Core runtime examples — timers, workers, storage, cryptography |
+| `network/` | HTTP, MQTT, WebSockets, DNS, and TLS examples |
+| `piu/` | UI framework examples — layouts, animations, touch handling |
+| `commodetto/` | 2D graphics and bitmap rendering examples |
+| `pins/` | GPIO, I²C, SPI, PWM, and analog I/O examples |
+
+<Tip>
+  Browse the `piu/` examples to see what the Moddable UI framework looks like in practice — many of them run on the desktop simulator without any hardware.
+</Tip>
+
+## Move to hardware
+
+After the simulator is working, your next step is to set up the toolchain for your target device. Each hardware platform has its own page covering the required SDK, flashing tools, and `mcconfig` platform flag:
+
+- **ESP32** → `devices/esp32`
+- **ESP8266** → `devices/esp8266`
+- **nRF52** → `devices/nrf52`
+- **Raspberry Pi Pico** → `devices/pico`
+- **Zephyr** → `devices/zephyr`
+
+Once a device toolchain is installed, you build for hardware the same way you build for the simulator — just change the `-p` flag. For example, to build helloworld for an ESP32:
+
+```bash
+mcconfig -d -m -p esp32
+```

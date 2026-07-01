@@ -1,0 +1,397 @@
+---
+title: "Moddable BLE API — BLEClient and BLEServer Reference"
+sidebarTitle: "BLE"
+description: "Scan for peripherals, read and write GATT characteristics, and advertise your own BLE services using BLEClient and BLEServer on Moddable devices."
+---
+
+The Moddable SDK BLE API lets your device act as a BLE central (scanning and connecting to peripherals) or a BLE peripheral (advertising services that other devices connect to). Both roles are class-based: you subclass `BLEClient` or `BLEServer`, override the lifecycle callbacks you care about, and instantiate the class to start the stack.
+
+## Manifest setup
+
+BLE is included in the standard network manifest:
+
+```json
+{
+  "include": [
+    "$(MODDABLE)/examples/manifest_net.json"
+  ]
+}
+```
+
+---
+
+## BLEClient — central role
+
+`BLEClient` connects to BLE peripherals (sensors, beacons, HID devices, etc.). Subclass it, override the callbacks that match the operations you need, and instantiate your class to initialise the BLE stack.
+
+```javascript
+import BLEClient from "bleClient";
+```
+
+### Lifecycle overview
+
+The BLEClient callbacks fire in this sequence for a typical read workflow:
+
+```
+onReady → startScanning → onDiscovered → connect
+  → onConnected → discoverAllPrimaryServices
+  → onServices → discoverAllCharacteristics
+  → onCharacteristics → readValue
+  → onCharacteristicValue
+```
+
+### Methods
+
+<ParamField path="this.startScanning(options)" type="method">
+  Start scanning for advertising peripherals.
+  <Expandable title="options properties">
+    <ParamField body="duplicates" type="boolean">
+      When `true`, report each advertisement packet even from already-seen devices.
+    </ParamField>
+    <ParamField body="active" type="boolean">
+      Send scan requests to get scan-response data from peripherals.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="this.stopScanning()" type="method">
+  Stop an in-progress scan.
+</ParamField>
+
+<ParamField path="this.connect(device)" type="method">
+  Initiate a connection to a `device` object received in `onDiscovered`.
+</ParamField>
+
+<ParamField path="device.discoverAllPrimaryServices()" type="method">
+  Discover all GATT services on a connected device. Results arrive in `onServices`.
+</ParamField>
+
+<ParamField path="service.discoverAllCharacteristics()" type="method">
+  Discover all characteristics within a service. Results arrive in `onCharacteristics`.
+</ParamField>
+
+<ParamField path="characteristic.readValue()" type="method">
+  Read the current value of a characteristic. Result arrives in `onCharacteristicValue`.
+</ParamField>
+
+<ParamField path="characteristic.writeWithoutResponse(value)" type="method">
+  Write an `ArrayBuffer` to a characteristic without waiting for a confirmation response.
+</ParamField>
+
+<ParamField path="characteristic.enableNotifications()" type="method">
+  Subscribe to value change notifications. Each change triggers `onCharacteristicNotification`.
+</ParamField>
+
+### Callbacks
+
+<ResponseField name="onReady()" type="callback">
+  The BLE stack is initialised. Begin scanning or other operations here.
+</ResponseField>
+
+<ResponseField name="onDiscovered(device)" type="callback">
+  Called for each advertising device during a scan.
+
+  The `device` object contains:
+  - `address` — device Bluetooth address string
+  - `addressType` — `"public"` or `"random"`
+  - `scanResponse` — parsed advertising data:
+    - `completeName` — full device name
+    - `shortName` — shortened device name
+    - `manufacturerSpecific` — manufacturer data as `ArrayBuffer`
+    - `flags` — advertising flags byte
+</ResponseField>
+
+<ResponseField name="onConnected(device)" type="callback">
+  A connection was established. Call `device.discoverAllPrimaryServices()` to begin GATT discovery.
+</ResponseField>
+
+<ResponseField name="onDisconnected(device)" type="callback">
+  The connection was dropped. Resume scanning or reconnect as needed.
+</ResponseField>
+
+<ResponseField name="onServices(services)" type="callback">
+  GATT service discovery is complete. Each `service` object has `uuid`, `start` (start handle), and `end` (end handle). Call `service.discoverAllCharacteristics()` on the service you want.
+</ResponseField>
+
+<ResponseField name="onCharacteristics(characteristics)" type="callback">
+  Characteristic discovery is complete. Each `characteristic` object has `uuid`, `handle`, and `properties` (bitmask). Call operations like `readValue()` or `enableNotifications()` on the characteristic you want.
+</ResponseField>
+
+<ResponseField name="onCharacteristicValue(characteristic, value)" type="callback">
+  A `readValue()` call completed. `value` is an `ArrayBuffer`. Parse it with a typed array view.
+</ResponseField>
+
+<ResponseField name="onCharacteristicNotification(characteristic, value)" type="callback">
+  A notification arrived from a subscribed characteristic. `value` is an `ArrayBuffer`.
+</ResponseField>
+
+### Full example — Battery Service
+
+This example connects to a peripheral named `"SensorTag"`, reads the Battery Level characteristic from the Battery Service (`0x180F`), and then subscribes to notifications.
+
+```javascript
+import BLEClient from "bleClient";
+
+class BatteryClient extends BLEClient {
+  onReady() {
+    trace("BLE ready, scanning...\n");
+    this.startScanning({ active: true });
+  }
+
+  onDiscovered(device) {
+    if (device.scanResponse.completeName === "SensorTag") {
+      this.stopScanning();
+      this.connect(device);
+    }
+  }
+
+  onConnected(device) {
+    trace(`Connected to ${device.address}\n`);
+    device.discoverAllPrimaryServices();
+  }
+
+  onDisconnected() {
+    trace("Disconnected — restarting scan\n");
+    this.startScanning({ active: true });
+  }
+
+  onServices(services) {
+    const battery = services.find(s => s.uuid === "180F");
+    if (battery) {
+      battery.discoverAllCharacteristics();
+    } else {
+      trace("Battery service not found\n");
+    }
+  }
+
+  onCharacteristics(characteristics) {
+    const level = characteristics.find(c => c.uuid === "2A19");
+    if (level) {
+      level.readValue();
+      level.enableNotifications();
+    }
+  }
+
+  onCharacteristicValue(characteristic, value) {
+    const level = new Uint8Array(value)[0];
+    trace(`Battery level: ${level}%\n`);
+  }
+
+  onCharacteristicNotification(characteristic, value) {
+    const level = new Uint8Array(value)[0];
+    trace(`Battery updated: ${level}%\n`);
+  }
+}
+
+new BatteryClient();
+```
+
+<Tip>
+  UUIDs for standard Bluetooth services and characteristics are defined in the Bluetooth Assigned Numbers document. Common ones: Battery Service `"180F"`, Battery Level `"2A19"`, Heart Rate `"180D"`, Device Name `"2A00"`.
+</Tip>
+
+---
+
+## BLEServer — peripheral role
+
+`BLEServer` turns your Moddable device into a BLE peripheral that other devices can discover and connect to. You define your GATT profile (services and characteristics) in a JSON file referenced in the manifest, then subclass `BLEServer` to handle reads, writes, and connection events.
+
+```javascript
+import BLEServer from "bleServer";
+```
+
+### GATT profile definition
+
+Define your services and characteristics in a separate JSON file and reference it from your `manifest.json`:
+
+```json
+{
+  "config": {
+    "ble": {
+      "server": {
+        "services": {
+          "path": "bleServices"
+        }
+      }
+    }
+  }
+}
+```
+
+Example `bleServices.json` for a Battery Service:
+
+```json
+[
+  {
+    "uuid": "180F",
+    "characteristics": [
+      {
+        "uuid": "2A19",
+        "maxBytes": 1,
+        "properties": ["read", "notify"],
+        "value": 85
+      }
+    ]
+  }
+]
+```
+
+### Methods
+
+<ParamField path="this.startAdvertising(options)" type="method">
+  Begin BLE advertising so central devices can discover you.
+  <Expandable title="options properties">
+    <ParamField body="advertisingData" type="object" required>
+      Data to include in the advertising packet:
+      - `flags` — advertising flags (e.g. `6` for LE General Discoverable + BR/EDR Not Supported)
+      - `completeName` — device name string
+      - `serviceUUID` — primary service UUID to advertise
+    </ParamField>
+    <ParamField body="fast" type="boolean">
+      Use fast advertising intervals (`true`) or slow intervals (`false`, default).
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="this.stopAdvertising()" type="method">
+  Stop broadcasting advertising packets.
+</ParamField>
+
+<ParamField path="this.notifyValue(characteristic, value)" type="method">
+  Push a new value to a subscribed central. `value` must be an `ArrayBuffer`.
+</ParamField>
+
+### Callbacks
+
+<ResponseField name="onReady()" type="callback">
+  The BLE stack is ready. Set `this.deviceName` and call `this.startAdvertising()` here.
+</ResponseField>
+
+<ResponseField name="onConnected(device)" type="callback">
+  A central device connected. `device.address` holds the central's Bluetooth address.
+</ResponseField>
+
+<ResponseField name="onDisconnected(device)" type="callback">
+  The central disconnected. Call `this.startAdvertising()` again to accept new connections.
+</ResponseField>
+
+<ResponseField name="onCharacteristicRead(params)" type="callback">
+  A central is reading a characteristic. `params.uuid` identifies which characteristic. Return the value as an `ArrayBuffer`. Return `undefined` to use the static value from your JSON profile.
+</ResponseField>
+
+<ResponseField name="onCharacteristicWritten(params)" type="callback">
+  A central wrote to a characteristic. `params.uuid` is the characteristic UUID and `params.value` is the written `ArrayBuffer`.
+</ResponseField>
+
+### Full example — battery peripheral
+
+```javascript
+import BLEServer from "bleServer";
+
+class BatteryServer extends BLEServer {
+  #level = 85;
+
+  onReady() {
+    this.deviceName = "ModdableBattery";
+    this.startAdvertising({
+      advertisingData: {
+        flags: 6,
+        completeName: this.deviceName,
+        serviceUUID: "180F"
+      }
+    });
+    trace("Advertising as ModdableBattery\n");
+  }
+
+  onConnected(device) {
+    trace(`Central connected: ${device.address}\n`);
+    this.stopAdvertising();
+  }
+
+  onDisconnected() {
+    trace("Central disconnected — restarting advertising\n");
+    this.startAdvertising({
+      advertisingData: {
+        flags: 6,
+        completeName: this.deviceName,
+        serviceUUID: "180F"
+      }
+    });
+  }
+
+  onCharacteristicRead(params) {
+    if (params.uuid === "2A19") {
+      trace(`Read battery level: ${this.#level}%\n`);
+      return Uint8Array.of(this.#level).buffer;
+    }
+  }
+
+  onCharacteristicWritten(params) {
+    trace(`Written to ${params.uuid}: ${new Uint8Array(params.value)}\n`);
+  }
+}
+
+new BatteryServer();
+```
+
+### Write with notification push
+
+When your sensor data changes, push the new value to any subscribed central instead of waiting for a read:
+
+```javascript
+// inside your BLEServer subclass, after a connected event:
+const newLevel = readBatterySensor(); // your own function
+const buf = Uint8Array.of(newLevel).buffer;
+this.notifyValue(batteryLevelChar, buf);
+```
+
+<Note>
+  The GATT profile JSON file is compiled into the firmware image. Changes to service or characteristic definitions require a full reflash of the device.
+</Note>
+
+---
+
+## Common patterns
+
+<Accordion title="Scan and connect with a timeout">
+  Scanning indefinitely drains the battery. Set a timer to stop the scan if no target is found:
+
+  ```javascript
+  import BLEClient from "bleClient";
+  import Timer from "timer";
+
+  class TimedScan extends BLEClient {
+    #timer;
+
+    onReady() {
+      this.startScanning();
+      this.#timer = Timer.set(() => {
+        this.stopScanning();
+        trace("Scan timed out\n");
+      }, 10_000); // 10 seconds
+    }
+
+    onDiscovered(device) {
+      if (device.scanResponse.completeName === "MyDevice") {
+        Timer.clear(this.#timer);
+        this.stopScanning();
+        this.connect(device);
+      }
+    }
+  }
+  ```
+</Accordion>
+
+<Accordion title="Write a value to a characteristic">
+  Send a command buffer to a writable characteristic:
+
+  ```javascript
+  onCharacteristics(characteristics) {
+    const ctrl = characteristics.find(c => c.uuid === "FF01");
+    if (ctrl) {
+      const cmd = new Uint8Array([0x01, 0x02, 0x03]);
+      ctrl.writeWithoutResponse(cmd.buffer);
+    }
+  }
+  ```
+</Accordion>

@@ -1,0 +1,277 @@
+---
+title: "Commodetto: Bitmap Graphics Library for Microcontrollers"
+sidebarTitle: "Commodetto"
+description: "Work with bitmaps, decode JPEG and PNG images, and render bitmap fonts using the Commodetto graphics library for Moddable microcontrollers."
+---
+
+Commodetto is the low-level graphics library at the heart of the Moddable SDK. It gives you a set of lightweight tools for managing pixel buffers, decoding compressed images, and loading bitmap fonts — all optimized to run in the constrained memory environment of a microcontroller. You typically use Commodetto classes directly when you need fine-grained control over pixel data, or as the foundation for the higher-level [Poco renderer](/api/poco).
+
+## Setup
+
+Add the following manifest entry to your project's `manifest.json` to include Commodetto:
+
+```json
+{
+  "include": ["$(MODDABLE)/examples/manifest_commodetto.json"]
+}
+```
+
+Then import only the modules you need:
+
+```javascript
+import Bitmap   from "commodetto/Bitmap";
+import JPEG     from "commodetto/JPEG";
+import PNG      from "commodetto/PNG";
+import parseBMF from "commodetto/parseBMF";
+```
+
+---
+
+## Bitmap
+
+A `Bitmap` represents a rectangular pixel buffer in device memory. You create one either by wrapping an existing `ArrayBuffer` or by receiving one from an image decoder.
+
+### Constructor
+
+```javascript
+const bitmap = new Bitmap(width, height, format, buffer, offset);
+```
+
+<ParamField path="width" type="number" required>
+  Width of the bitmap in pixels.
+</ParamField>
+
+<ParamField path="height" type="number" required>
+  Height of the bitmap in pixels.
+</ParamField>
+
+<ParamField path="format" type="number" required>
+  Pixel format constant (see [Pixel Formats](#pixel-formats) below).
+</ParamField>
+
+<ParamField path="buffer" type="ArrayBuffer" required>
+  The underlying pixel data buffer. The bitmap does not copy this — it references it directly.
+</ParamField>
+
+<ParamField path="offset" type="number">
+  Byte offset into `buffer` where the pixel data begins. Defaults to `0`.
+</ParamField>
+
+### Properties
+
+<ResponseField name="width" type="number">
+  Width of the bitmap in pixels. Read-only.
+</ResponseField>
+
+<ResponseField name="height" type="number">
+  Height of the bitmap in pixels. Read-only.
+</ResponseField>
+
+<ResponseField name="format" type="number">
+  The pixel format constant used when the bitmap was created. Read-only.
+</ResponseField>
+
+<ResponseField name="buffer" type="ArrayBuffer">
+  The raw pixel data buffer backing this bitmap.
+</ResponseField>
+
+### Pixel Formats
+
+Use these constants from the `Bitmap` class to specify and inspect pixel formats:
+
+| Constant | Bits per pixel | Description |
+|---|---|---|
+| `Bitmap.RGB565LE` | 16 | Little-endian RGB565 — the most common format for color displays |
+| `Bitmap.RGB332` | 8 | Compact 8-bit RGB |
+| `Bitmap.Gray256` | 8 | 8-bit grayscale |
+| `Bitmap.Monochrome` | 1 | 1-bit black-and-white |
+| `Bitmap.CLUT16` | 4 | 4-bit indexed color with a 16-entry lookup table |
+
+### Example — create a bitmap from a pixel buffer
+
+```javascript
+import Bitmap from "commodetto/Bitmap";
+
+const width  = 16;
+const height = 16;
+// Each RGB565LE pixel is 2 bytes
+const buffer = new ArrayBuffer(width * height * 2);
+
+const bitmap = new Bitmap(width, height, Bitmap.RGB565LE, buffer, 0);
+trace(`${bitmap.width}×${bitmap.height} px\n`);
+```
+
+---
+
+## JPEG Decoder
+
+The `JPEG` class lets you decode a JPEG image stored as a resource directly on the device, without needing an external library or a large heap allocation.
+
+### Constructor
+
+```javascript
+import JPEG     from "commodetto/JPEG";
+import Resource from "Resource";
+
+const jpeg = new JPEG(new Resource("photo.jpg"));
+```
+
+<ParamField path="data" type="Resource | ArrayBuffer" required>
+  The compressed JPEG data, typically loaded with `new Resource(...)`.
+</ParamField>
+
+### Methods
+
+<ResponseField name="read()" type="Bitmap">
+  Decodes the JPEG and returns a `Bitmap` containing the decompressed pixels. The bitmap's format is `Bitmap.RGB565LE`.
+</ResponseField>
+
+### Properties
+
+<ResponseField name="width" type="number">
+  Image width in pixels. Available before calling `read()`.
+</ResponseField>
+
+<ResponseField name="height" type="number">
+  Image height in pixels. Available before calling `read()`.
+</ResponseField>
+
+### Example — decode and inspect a JPEG
+
+```javascript
+import JPEG     from "commodetto/JPEG";
+import Resource from "Resource";
+
+const jpeg = new JPEG(new Resource("photo.jpg"));
+trace(`Image size: ${jpeg.width}×${jpeg.height}\n`);
+
+const bitmap = jpeg.read();
+trace(`Bitmap format: ${bitmap.format}\n`); // Bitmap.RGB565LE
+```
+
+<Note>
+  JPEG decoding allocates a temporary work buffer. On devices with very limited RAM, decode one image at a time and release the reference before decoding the next.
+</Note>
+
+---
+
+## PNG Decoder
+
+The `PNG` class decodes PNG images stored as resources. PNG supports transparency (alpha channel), making it useful for icons and UI elements.
+
+### Constructor
+
+```javascript
+import PNG      from "commodetto/PNG";
+import Resource from "Resource";
+
+const png = new PNG(new Resource("icon.png"));
+```
+
+<ParamField path="data" type="Resource | ArrayBuffer" required>
+  The compressed PNG data, typically loaded with `new Resource(...)`.
+</ParamField>
+
+### Methods
+
+<ResponseField name="read()" type="Bitmap">
+  Decodes the PNG and returns a `Bitmap`. The bitmap format reflects the PNG's color type (e.g., `Bitmap.RGB565LE` for RGB, or a format with an alpha channel for RGBA images).
+</ResponseField>
+
+### Properties
+
+<ResponseField name="width" type="number">
+  Image width in pixels.
+</ResponseField>
+
+<ResponseField name="height" type="number">
+  Image height in pixels.
+</ResponseField>
+
+### Example — decode a PNG icon
+
+```javascript
+import PNG      from "commodetto/PNG";
+import Resource from "Resource";
+
+const png    = new PNG(new Resource("icon.png"));
+const bitmap = png.read();
+trace(`Icon: ${bitmap.width}×${bitmap.height}\n`);
+```
+
+---
+
+## BMFont Parser
+
+`parseBMF` converts a pre-rendered bitmap font resource (`.bf4` format) into a font object you can pass to `poco.drawText()`.
+
+### Function signature
+
+```javascript
+import parseBMF  from "commodetto/parseBMF";
+import Resource  from "Resource";
+
+const font = parseBMF(new Resource("OpenSans-Regular-20.bf4"));
+```
+
+<ParamField path="data" type="Resource | ArrayBuffer" required>
+  A `.bf4` bitmap font resource. Generate `.bf4` files from TrueType fonts using the `fontconvert` command-line tool included in the Moddable SDK.
+</ParamField>
+
+The return value is an opaque font descriptor object. Pass it directly to [`poco.drawText()`](/api/poco#drawing-text) or [`poco.getTextWidth()`](/api/poco#measuring-text).
+
+### Converting a TrueType font
+
+Run `fontconvert` from your project directory to produce a `.bf4` file:
+
+```bash
+fontconvert OpenSans-Regular.ttf 20 32 127 OpenSans-Regular-20.bf4
+```
+
+The arguments are: font file, point size, first character code point, last character code point, output file.
+
+<Tip>
+  Pre-render only the character ranges you actually need (for example, ASCII 32–127). This reduces both the `.bf4` file size and the RAM consumed at runtime.
+</Tip>
+
+### Example — load a font and measure text
+
+```javascript
+import parseBMF  from "commodetto/parseBMF";
+import Poco      from "commodetto/Poco";
+import Resource  from "Resource";
+
+const font  = parseBMF(new Resource("OpenSans-Regular-20.bf4"));
+const poco  = new Poco(screen, { displayListLength: 1024 });
+const width = poco.getTextWidth("Hello, world!", font);
+
+trace(`Text width: ${width} px\n`);
+```
+
+---
+
+## Putting it all together
+
+The following example loads a JPEG, a PNG icon, and a font, then renders them using Poco:
+
+```javascript
+import Bitmap   from "commodetto/Bitmap";
+import JPEG     from "commodetto/JPEG";
+import PNG      from "commodetto/PNG";
+import parseBMF from "commodetto/parseBMF";
+import Poco     from "commodetto/Poco";
+import Resource from "Resource";
+
+const poco = new Poco(screen, { displayListLength: 2048 });
+
+const photo  = new JPEG(new Resource("photo.jpg")).read();
+const icon   = new PNG(new Resource("icon.png")).read();
+const font   = parseBMF(new Resource("OpenSans-Regular-20.bf4"));
+const white  = poco.makeColor(255, 255, 255);
+
+poco.begin();
+  poco.drawBitmap(photo, 0, 0);
+  poco.drawBitmap(icon, 4, 4);
+  poco.drawText("Hello!", font, white, 10, 80);
+poco.end();
+```

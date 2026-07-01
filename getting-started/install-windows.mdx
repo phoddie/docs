@@ -1,0 +1,143 @@
+---
+title: "Install the Moddable SDK on Windows: Complete Setup Guide"
+sidebarTitle: "Windows"
+description: "Set up the Moddable SDK on Windows, build the developer tools with Visual Studio, and verify your installation by running the helloworld example."
+---
+
+The Moddable SDK runs on Windows 8.1 and newer, with Windows 11 recommended. The build toolchain relies on Microsoft Visual Studio, so you will need the Community edition (free) or higher installed before you begin. Plan for 20–30 minutes including the Visual Studio setup.
+
+<Warning>
+  All build commands must be run from the **x86 Native Tools Command Prompt for VS**, not from a standard Command Prompt or PowerShell window. Using the wrong terminal is the most common source of build failures on Windows.
+</Warning>
+
+## Prerequisites
+
+- Windows 8.1 or newer (Windows 11 recommended)
+- Microsoft Visual Studio Community 2017 or newer ([VS 2022 recommended](https://visualstudio.microsoft.com/downloads/))
+- Git for Windows
+
+## Installation
+
+<Steps>
+  <Step title="Install Visual Studio with C++ support">
+    Download the Visual Studio Community installer from [visualstudio.microsoft.com/downloads](https://visualstudio.microsoft.com/downloads/) and run it.
+
+    During installation, make the following selections:
+
+    - **Workloads tab** — check **Desktop development with C++**
+    - **Individual Components tab** — confirm **Windows 11 SDK** is checked
+
+    <Note>
+      If you already have Visual Studio installed, open the Visual Studio Installer and click **Modify** to add the Desktop development with C++ workload.
+    </Note>
+  </Step>
+
+  <Step title="Create a Projects directory">
+    Open a Command Prompt and create the directory where you will clone the repository:
+
+    ```cmd
+    mkdir %USERPROFILE%\Projects
+    ```
+  </Step>
+
+  <Step title="Clone the Moddable repository">
+    ```cmd
+    cd %USERPROFILE%\Projects
+    git clone https://github.com/Moddable-OpenSource/moddable
+    ```
+  </Step>
+
+  <Step title="Set the environment variables">
+    Open the Environment Variables dialog:
+
+    **Control Panel → System → Advanced system settings → Environment Variables**
+
+    Under **User variables**, make the following changes:
+
+    1. Click **New** and create a variable named `MODDABLE` with the value:
+       ```
+       %USERPROFILE%\Projects\moddable
+       ```
+    2. Select the `Path` variable, click **Edit**, then click **New** and add:
+       ```
+       %USERPROFILE%\Projects\moddable\build\bin\win\release
+       ```
+
+    Click **OK** on all dialogs to save your changes.
+  </Step>
+
+  <Step title="Open a new Command Prompt">
+    Close any existing Command Prompt windows and open a fresh one so the environment variables you just set are loaded.
+  </Step>
+
+  <Step title="Build the Moddable tools">
+    Open the **x86 Native Tools Command Prompt for VS** (search for it in the Start menu), then run:
+
+    ```cmd
+    cd %MODDABLE%\build\makefiles\win
+    build
+    ```
+
+    This compiles `mcconfig`, `mcrun`, xsbug, and the other SDK tools. The build may take several minutes.
+  </Step>
+
+  <Step title="Launch xsbug">
+    Start the xsbug JavaScript debugger to confirm it built correctly:
+
+    ```cmd
+    xsbug
+    ```
+
+    xsbug should open as a desktop window. Leave it running for the next step.
+  </Step>
+
+  <Step title="Run the helloworld verification">
+    Build and run the helloworld example on the Windows simulator:
+
+    ```cmd
+    cd %MODDABLE%\examples\helloworld
+    mcconfig -d -m -p win
+    ```
+
+    You should see `Hello, World` printed in the xsbug console. A successful run confirms your installation is complete.
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### `LNK1104: cannot open file`
+
+Your antivirus software is likely locking files during the build. Add `%MODDABLE%` to your antivirus exclusion list and retry the build.
+
+### `'nmake' is not recognized as an internal or external command`
+
+One of the following is the cause:
+
+- Visual Studio is not installed, or the **Desktop development with C++** workload was not selected
+- You are running the build from a standard Command Prompt instead of the **x86 Native Tools Command Prompt for VS**
+
+Open the correct prompt (search "x86 Native Tools" in the Start menu) and retry.
+
+### `LNK1112: module machine type 'x64' conflicts with 'x86'`
+
+You ran the build from the **x64** Native Tools prompt. The Moddable SDK requires the **x86** Native Tools Command Prompt for VS. Open the correct prompt and retry.
+
+## Updating the SDK
+
+When a new version of the Moddable SDK is released, pull the latest changes, clean the old build artifacts, and rebuild:
+
+```cmd
+cd %MODDABLE%
+git pull
+
+cd %MODDABLE%\build\makefiles\win
+build clean
+build
+
+cd %MODDABLE%\examples\helloworld
+mcconfig -d -m -p win
+```
+
+<Tip>
+  Run these update commands from the **x86 Native Tools Command Prompt for VS**, just as you did for the initial build.
+</Tip>

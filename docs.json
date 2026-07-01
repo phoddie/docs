@@ -1,0 +1,138 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "name": "Moddable SDK",
+  "theme": "palm",
+  "colors": {
+    "primary": "#ef7025",
+    "light": "#eec9bc",
+    "dark": "#4fa1ab"
+  },
+  "favicon": "/favicon.svg",
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/Moddable-OpenSource/moddable"
+    }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "getting-started/install-macos",
+              "getting-started/install-windows",
+              "getting-started/install-linux",
+              "getting-started/first-app"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "core-concepts/manifest",
+              "core-concepts/xs-engine",
+              "core-concepts/mods",
+              "core-concepts/tools"
+            ]
+          },
+          {
+            "group": "Hardware",
+            "pages": [
+              "devices/overview",
+              "devices/esp32",
+              "devices/esp8266",
+              "devices/nrf52",
+              "devices/pico",
+              "devices/zephyr"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/networking",
+              "guides/graphics",
+              "guides/hardware-io",
+              "guides/ui-with-piu",
+              "guides/files-storage",
+              "guides/security"
+            ]
+          },
+          {
+            "group": "Debugging & Testing",
+            "pages": [
+              "debugging/xsbug",
+              "debugging/simulator",
+              "debugging/testing"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Base",
+            "pages": [
+              "api/base",
+              "api/data",
+              "api/files"
+            ]
+          },
+          {
+            "group": "Networking",
+            "pages": [
+              "api/network",
+              "api/ble",
+              "api/tls"
+            ]
+          },
+          {
+            "group": "Graphics",
+            "pages": [
+              "api/commodetto",
+              "api/poco",
+              "api/piu"
+            ]
+          },
+          {
+            "group": "Hardware",
+            "pages": [
+              "api/pins",
+              "api/io",
+              "api/audio"
+            ]
+          },
+          {
+            "group": "Security",
+            "pages": [
+              "api/crypt"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/Moddable-OpenSource/moddable",
+      "x": "https://twitter.com/moddabletech"
+    }
+  },
+  "contextual": {
+    "options": [
+      "copy",
+      "assistant",
+      "view",
+      "claude",
+      "chatgpt",
+      "mcp",
+      "add-mcp",
+      "vscode",
+      "cursor"
+    ],
+    "display": "header"
+  }
+}

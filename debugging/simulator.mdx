@@ -1,0 +1,132 @@
+---
+title: "Moddable SDK Desktop Simulator: Run Apps Without Hardware"
+sidebarTitle: "Simulator"
+description: "Run and debug Moddable apps on your desktop without hardware using the built-in simulator — supports touch, networking, and full xsbug integration."
+---
+
+The Moddable SDK ships with a desktop simulator (`mcsim`) that runs your JavaScript application natively on macOS, Linux, or Windows. The simulator renders your app's display in a window at pixel-perfect resolution, accepts touch input via mouse clicks and drags, and connects to xsbug for full source-level debugging — all without a microcontroller in sight.
+
+Use the simulator to iterate quickly on UI layout and application logic, then deploy to hardware to validate hardware-specific behavior.
+
+## Run your app in the simulator
+
+Pass the appropriate platform flag to `mcconfig` along with `-d` (debug) and `-m` (make):
+
+<Tabs>
+  <Tab title="macOS">
+    ```bash
+    mcconfig -d -m -p mac
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```bash
+    mcconfig -d -m -p win
+    ```
+  </Tab>
+  <Tab title="Linux">
+    ```bash
+    mcconfig -d -m -p lin
+    ```
+  </Tab>
+</Tabs>
+
+`mcconfig` builds the app and launches the simulator window. If xsbug is already open, the app connects to it automatically. If xsbug is not running, the app starts anyway and waits for a connection.
+
+<Note>
+  The `-d` flag is optional but strongly recommended. Without it, the XS runtime strips debug information and xsbug cannot connect. Always include `-d` during development.
+</Note>
+
+## Interact with the simulator
+
+The simulator window behaves like a touchscreen device:
+
+- **Tap** — click the left mouse button inside the window to send a touch-begin/touch-end event
+- **Swipe / drag** — click and hold, then move the mouse to simulate a drag gesture
+- **Release** — releasing the mouse button sends the touch-end event
+
+This lets you test scrolling lists, button presses, and gesture-driven navigation without a physical device.
+
+## Set a custom screen size
+
+By default the simulator uses the screen dimensions defined in the example or target manifest. To override them for the simulator platform only, add a `platforms.simulator` block to your project's `manifest.json`:
+
+```json
+{
+  "platforms": {
+    "simulator": {
+      "defines": {
+        "screen": {
+          "width": 320,
+          "height": 240
+        }
+      }
+    }
+  }
+}
+```
+
+You can prototype different display sizes — 128×128, 240×320, 480×320, and so on — without changing any application code.
+
+## Rotate the display
+
+Pass a `-r` argument to `mcconfig` to simulate screen rotation. This is useful for testing landscape/portrait layouts:
+
+```bash
+mcconfig -d -m -p mac -r 90   # rotate 90° clockwise
+mcconfig -d -m -p mac -r 180  # rotate 180°
+mcconfig -d -m -p mac -r 270  # rotate 270° clockwise
+```
+
+## What the simulator supports
+
+<Accordion title="Supported features">
+  | Feature | Simulator behavior |
+  |---|---|
+  | Display rendering | Pixel-perfect, hardware-accelerated window |
+  | Touch input | Mouse click and drag map to touch events |
+  | xsbug debugging | Full breakpoints, stepping, variables, profiler |
+  | Networking (HTTP, WebSockets, MQTT) | Uses the host OS network stack |
+  | File / flash storage | Simulated in a local file on disk |
+  | Audio output | Host OS sound system (macOS, full support) |
+  | Screen rotation | Via `-r` flag |
+</Accordion>
+
+<Accordion title="Known limitations">
+  | Feature | Status |
+  |---|---|
+  | GPIO / digital pins | No-op — calls succeed but have no effect |
+  | I2C / SPI peripherals | Not simulated |
+  | BLE (Bluetooth Low Energy) | Not available |
+  | Audio (Windows / Linux) | Partial or unavailable |
+
+  If your app depends on GPIO, I2C, SPI, or BLE, test that code directly on the target device. The simulator is best suited for UI and application-logic development.
+</Accordion>
+
+## Debug with xsbug
+
+Because the simulator supports the full xsbug debug protocol, your entire debugging workflow transfers directly from the simulator to hardware:
+
+<Steps>
+  <Step title="Launch xsbug">
+    Start xsbug on your development machine before or after launching the simulator. See the [xsbug guide](/debugging/xsbug) for platform-specific launch instructions.
+  </Step>
+  <Step title="Build and run in the simulator">
+    ```bash
+    mcconfig -d -m -p mac
+    ```
+    The simulator window opens and the app connects to xsbug.
+  </Step>
+  <Step title="Set breakpoints and inspect state">
+    Click in the gutter of any source file in xsbug to set a breakpoint. Interact with the simulator window to trigger the code path you want to examine.
+  </Step>
+  <Step title="Use trace() for quick logging">
+    ```javascript
+    trace(`Button pressed: ${id}\n`);
+    ```
+    Output appears in the xsbug Console panel in real time.
+  </Step>
+</Steps>
+
+<Tip>
+  Develop and debug the bulk of your application in the simulator for fast build-and-test cycles. Hardware deployments take longer to flash, and you cannot use a mouse to interact with most physical devices. Switch to hardware only when you need to test sensor input, BLE, or other peripherals the simulator cannot replicate.
+</Tip>

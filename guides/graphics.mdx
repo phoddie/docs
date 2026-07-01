@@ -1,0 +1,257 @@
+---
+title: "Graphics with Commodetto and Poco Renderer on Moddable"
+sidebarTitle: "Graphics"
+description: "Render shapes, text, and images on embedded displays using the Moddable SDK's Commodetto bitmap library and Poco scanline renderer."
+---
+
+The Moddable SDK ships two complementary graphics layers. **Commodetto** is the low-level bitmap and image library — it handles pixel buffers, fonts, JPEG decoding, and PNG loading. **Poco** sits on top of Commodetto as a lightweight scanline renderer that draws shapes, text, and bitmaps onto any display driver that exposes a `screen` object.
+
+## Prerequisites
+
+Include the Commodetto manifest in your project:
+
+```json
+{
+  "include": [
+    "$(MODDABLE)/examples/manifest_commodetto.json"
+  ]
+}
+```
+
+## The Rendering Model
+
+Poco uses a **begin / draw / end** pattern. All drawing calls between `poco.begin()` and `poco.end()` are batched into scan-line segments and flushed to the display driver in one pass — minimising the number of SPI or parallel-bus transactions.
+
+<Note>
+  You cannot read back pixels from the display. Poco is a write-only renderer; keep track of what you drew in your own application state if you need to update it later.
+</Note>
+
+## Filling and Drawing Rectangles
+
+The simplest operation is filling the screen with a solid colour, then drawing a rectangle on top:
+
+```javascript
+import Poco from "commodetto/Poco";
+
+const poco = new Poco(screen, { displayListLength: 1024 });
+
+poco.begin();
+  // Fill the whole screen white
+  poco.fillRectangle(poco.makeColor(255, 255, 255), 0, 0, poco.width, poco.height);
+  // Blend a semi-transparent blue rectangle at (10, 10), 50×50 pixels
+  poco.blendRectangle(poco.makeColor(0, 0, 255), 128, 10, 10, 50, 50);
+poco.end();
+```
+
+### Color helper
+
+`poco.makeColor(r, g, b)` converts 8-bit RGB values into the packed pixel format expected by the display driver (e.g. RGB565LE). Always use this helper instead of hard-coding packed values.
+
+## Drawing Text
+
+Text rendering requires a BMFont file (`.bf4`) bundled with your application as a resource.
+
+```javascript
+import Poco from "commodetto/Poco";
+import parseBMF from "commodetto/parseBMF";
+import Resource from "Resource";
+
+const poco = new Poco(screen, { displayListLength: 1024 });
+const font = parseBMF(new Resource("OpenSans-Regular-20.bf4"));
+
+poco.begin();
+  poco.fillRectangle(poco.makeColor(255, 255, 255), 0, 0, poco.width, poco.height);
+  poco.drawText("Hello!", font, poco.makeColor(0, 0, 0), 10, 10);
+poco.end();
+```
+
+<Steps>
+  <Step title="Add the font to your manifest">
+    Reference the `.bf4` file in your manifest's `resources` section so the build system bundles it:
+
+    ```json
+    {
+      "resources": {
+        "*": ["./resources/OpenSans-Regular-20"]
+      }
+    }
+    ```
+  </Step>
+  <Step title="Parse the font at startup">
+    Call `parseBMF(new Resource("OpenSans-Regular-20.bf4"))` once and cache the result. Parsing on every frame wastes CPU cycles.
+  </Step>
+  <Step title="Draw text inside begin/end">
+    Pass the font object, colour, and (x, y) position to `poco.drawText`.
+  </Step>
+</Steps>
+
+## Displaying Images
+
+### JPEG
+
+Decode and display a JPEG image bundled as a resource:
+
+```javascript
+import Poco from "commodetto/Poco";
+import JPEG from "commodetto/JPEG";
+import Resource from "Resource";
+
+const poco = new Poco(screen, { displayListLength: 1024 });
+const jpeg = new JPEG(new Resource("photo.jpg"));
+const bitmap = jpeg.read();
+
+poco.begin();
+  poco.drawBitmap(bitmap, 0, 0);
+poco.end();
+```
+
+<Warning>
+  JPEG decoding is memory-intensive. Decoding a large image on a device with limited RAM can trigger an out-of-memory exception. Resize images to match your display resolution before bundling them.
+</Warning>
+
+### PNG
+
+Load and display a PNG image bundled as a resource:
+
+```javascript
+import Poco from "commodetto/Poco";
+import PNG from "commodetto/PNG";
+import Resource from "Resource";
+
+const poco = new Poco(screen, { displayListLength: 1024 });
+const png = new PNG(new Resource("icon.png"));
+const bitmap = png.read();
+
+poco.begin();
+  poco.drawBitmap(bitmap, 0, 0);
+poco.end();
+```
+
+### BMP
+
+Pre-converted BMP files are faster to load because they require no decode step:
+
+```javascript
+import Poco from "commodetto/Poco";
+import parseBMP from "commodetto/parseBMP";
+import Resource from "Resource";
+
+const poco = new Poco(screen, { displayListLength: 1024 });
+const bitmap = parseBMP(new Resource("logo.bmp"));
+
+poco.begin();
+  poco.drawBitmap(bitmap, 0, 0);
+poco.end();
+```
+
+## Pixel Formats
+
+Poco adapts to the pixel format reported by the display driver's `screen` object. You never set the format manually — the `screen` object provided by the display driver declares it.
+
+| Format | Bits/pixel | Typical display |
+|---|---|---|
+| `RGB565LE` | 16 | Most colour TFTs |
+| `RGB332` | 8 | Low-cost monochrome-like panels |
+| `Gray256` | 8 | E-paper / greyscale displays |
+| `CLUT16` | 4 | Indexed-colour panels |
+
+<Tip>
+  Use the Moddable image conversion tools to pre-convert your assets to the correct format at build time, avoiding runtime conversion overhead.
+</Tip>
+
+## Converting Images for On-Device Use
+
+<Tabs>
+  <Tab title="PNG → BMP">
+    ```bash
+    png2bmp -o output.bmp input.png
+    ```
+
+    Use `png2bmp` (included in the Moddable toolchain) to convert PNG files to a BMP format Poco can parse directly.
+  </Tab>
+  <Tab title="Specifying pixel format">
+    ```bash
+    png2bmp -f rgb565le -o output.bmp input.png
+    ```
+
+    Pass `-f` to target a specific pixel format and avoid any runtime conversion.
+  </Tab>
+  <Tab title="Font conversion">
+    ```bash
+    # Convert a TrueType font at 20px to BMFont
+    mcconfig -m -p esp32 -f OpenSans-Regular.ttf -s 20
+    ```
+
+    The Moddable build system invokes the font converter automatically when you reference a font in your manifest.
+  </Tab>
+</Tabs>
+
+## Partial Screen Updates
+
+You can pass a clipping rectangle to `poco.begin()` to update only part of the display — useful for animations or status bars:
+
+```javascript
+poco.begin(0, 0, poco.width, 20); // update only the top 20-pixel status bar
+  poco.fillRectangle(poco.makeColor(0, 0, 0), 0, 0, poco.width, 20);
+  poco.drawText("12:34", font, poco.makeColor(255, 255, 255), 4, 2);
+poco.end();
+```
+
+<Tip>
+  Partial updates dramatically reduce SPI bus traffic on large displays. Always restrict `begin()` to the smallest rectangle that covers your changed content.
+</Tip>
+
+## Drawing Patterns and Gradients
+
+<Accordion title="Tiling a bitmap as a background pattern">
+  Pass a source bitmap and a destination rectangle to `poco.fillBitmap` to tile the bitmap across the area:
+
+  ```javascript
+  poco.begin();
+    poco.fillBitmap(tileBitmap, 0, 0, poco.width, poco.height);
+  poco.end();
+  ```
+
+  The bitmap is repeated (tiled) to fill the destination rectangle.
+</Accordion>
+
+<Accordion title="Drawing with blending / alpha">
+  Poco supports alpha blending for bitmaps that carry an alpha channel. Pass a bitmap with pixel format `Gray16` as the alpha mask:
+
+  ```javascript
+  poco.begin();
+    poco.drawGray(grayBitmap, poco.makeColor(255, 0, 0), 0, 0);
+  poco.end();
+  ```
+
+  `drawGray` treats each pixel of the greyscale bitmap as an opacity value and blends the supplied colour against whatever is already on screen.
+</Accordion>
+
+## Common Patterns
+
+<CodeGroup>
+  ```javascript Clear screen
+  poco.begin();
+    poco.fillRectangle(poco.makeColor(0, 0, 0), 0, 0, poco.width, poco.height);
+  poco.end();
+  ```
+
+  ```javascript Centered text
+  const text = "Centered";
+  const textWidth = poco.getTextWidth(text, font);
+  const x = (poco.width - textWidth) >> 1;
+  const y = (poco.height - font.height) >> 1;
+
+  poco.begin();
+    poco.fillRectangle(poco.makeColor(255, 255, 255), 0, 0, poco.width, poco.height);
+    poco.drawText(text, font, poco.makeColor(0, 0, 0), x, y);
+  poco.end();
+  ```
+
+  ```javascript Image with text overlay
+  poco.begin();
+    poco.drawBitmap(bgBitmap, 0, 0);
+    poco.drawText("Overlay", font, poco.makeColor(255, 255, 0), 4, 4);
+  poco.end();
+  ```
+</CodeGroup>

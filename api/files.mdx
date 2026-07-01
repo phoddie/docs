@@ -1,0 +1,539 @@
+---
+title: "Files Modules: Files, Preference, Resource, Flash, Zip"
+sidebarTitle: "Files"
+description: "Access persistent storage, flash partitions, bundled resources, key-value preferences, and ZIP archives on Moddable embedded devices."
+---
+
+The files modules give you layered access to every form of non-volatile storage on a Moddable device: a simple file system abstraction for read/write data, a key-value preference store for configuration, read-only resources bundled directly in flash, raw NOR flash partition access, and in-memory ZIP archive reading. Choose the layer that matches your use case — most applications combine two or three of these modules.
+
+## Files
+
+A portable file system API for creating, reading, writing, and listing files on the device's internal storage (typically a small SPI flash partition formatted as FAT or SPIFFS).
+
+```javascript
+import Files from "files";
+```
+
+### Files.exists()
+
+Checks whether a file exists at the given path.
+
+<ParamField path="path" type="string" required>
+  Absolute path on the device file system (e.g. `"/data/config.json"`).
+</ParamField>
+
+<ResponseField name="returns" type="boolean">
+  `true` if the file exists and is accessible, `false` otherwise.
+</ResponseField>
+
+```javascript
+import Files from "files";
+
+if (Files.exists("/data/config.json")) {
+  trace("Config found\n");
+} else {
+  trace("No config — using defaults\n");
+}
+```
+
+### Files.read()
+
+Reads the entire contents of a file in a single call.
+
+<ParamField path="path" type="string" required>
+  Path to the file to read.
+</ParamField>
+
+<ParamField path="type" type="constructor">
+  Pass `String` to return the file contents as a string. Omit (or pass `ArrayBuffer`) to return raw bytes.
+</ParamField>
+
+<ResponseField name="returns" type="ArrayBuffer | string">
+  File contents as an `ArrayBuffer` by default, or a `string` when `String` is passed as the second argument.
+</ResponseField>
+
+```javascript
+// Read as ArrayBuffer
+const raw = Files.read("/data/image.bin");
+trace(`Read ${raw.byteLength} bytes\n`);
+
+// Read as string
+const text = Files.read("/data/config.json", String);
+const config = JSON.parse(text);
+trace(`Device name: ${config.name}\n`);
+```
+
+### Files.write()
+
+Writes data to a file, creating it if it doesn't exist and overwriting it if it does.
+
+<ParamField path="path" type="string" required>
+  Destination path on the device file system.
+</ParamField>
+
+<ParamField path="data" type="ArrayBuffer | string | number" required>
+  Data to write. Strings are written as UTF-8 bytes. Numbers are written as their 32-bit integer representation.
+</ParamField>
+
+```javascript
+// Write a JSON config file
+const config = { name: "sensor-01", interval: 500 };
+Files.write("/data/config.json", JSON.stringify(config));
+
+// Write raw binary data
+const buf = new Uint8Array([0xAA, 0xBB, 0xCC]).buffer;
+Files.write("/data/calibration.bin", buf);
+```
+
+### Files.delete()
+
+Removes a file from the file system.
+
+<ParamField path="path" type="string" required>
+  Path of the file to delete.
+</ParamField>
+
+```javascript
+Files.delete("/data/old-log.txt");
+```
+
+### Files.rename()
+
+Renames or moves a file.
+
+<ParamField path="from" type="string" required>
+  Current file path.
+</ParamField>
+
+<ParamField path="to" type="string" required>
+  New file path. If `to` is in a different directory, the file is moved (the target directory must already exist).
+</ParamField>
+
+```javascript
+// Atomic config update: write to temp, then rename into place
+Files.write("/data/config.tmp", JSON.stringify(newConfig));
+Files.rename("/data/config.tmp", "/data/config.json");
+```
+
+### Files.openDirectory()
+
+Returns an iterator for listing files in a directory.
+
+<ParamField path="path" type="string" required>
+  Path to the directory to list.
+</ParamField>
+
+<ResponseField name="returns" type="iterator">
+  A directory iterator. Call `.next()` to advance; it returns an object with `name`, `size`, and `mode` properties, or `undefined` when the listing is exhausted. Always call `.close()` when you are done.
+</ResponseField>
+
+<Expandable title="Directory entry properties">
+  <ResponseField name="name" type="string">
+    File name (without directory path).
+  </ResponseField>
+  <ResponseField name="size" type="number">
+    File size in bytes.
+  </ResponseField>
+  <ResponseField name="mode" type="number">
+    Bit flags describing the entry type. Check `entry.mode & Files.File` or `entry.mode & Files.Directory` to distinguish files from subdirectories.
+  </ResponseField>
+</Expandable>
+
+```javascript
+import Files from "files";
+
+const dir = Files.openDirectory("/data");
+let entry;
+
+while ((entry = dir.next()) !== undefined) {
+  const type = (entry.mode & Files.Directory) ? "DIR " : "FILE";
+  trace(`${type}  ${entry.name.padEnd(24)} ${entry.size} B\n`);
+}
+
+dir.close();
+```
+
+### Files.openFile()
+
+Opens a file for streaming read/write access. Use this instead of `Files.read()` / `Files.write()` when you need to access a file partially or when the file is too large to hold entirely in memory.
+
+<ParamField path="path" type="string" required>
+  Path to the file.
+</ParamField>
+
+<ParamField path="mode" type="number" required>
+  One of `Files.read`, `Files.write`, or `Files.readWrite`.
+</ParamField>
+
+<ResponseField name="returns" type="File">
+  A `File` object. Remember to call `file.close()` when you are finished.
+</ResponseField>
+
+<Expandable title="File object API">
+  <ResponseField name="file.read(type, count)" type="method">
+    Reads up to `count` bytes from the current position. Pass `ArrayBuffer` or `String` as `type`. Returns the data read, or `undefined` at end of file.
+  </ResponseField>
+  <ResponseField name="file.write(data)" type="method">
+    Writes `data` (string, `ArrayBuffer`, or number) starting at the current position.
+  </ResponseField>
+  <ResponseField name="file.seek(position)" type="method">
+    Moves the read/write cursor to a byte offset from the start of the file.
+  </ResponseField>
+  <ResponseField name="file.position" type="number">
+    Current byte offset within the file (read-only).
+  </ResponseField>
+  <ResponseField name="file.length" type="number">
+    Total file size in bytes (read-only).
+  </ResponseField>
+  <ResponseField name="file.close()" type="method">
+    Flushes and closes the file. Call this when finished to avoid resource leaks.
+  </ResponseField>
+</Expandable>
+
+```javascript
+import Files from "files";
+
+// Append a log line without loading the whole file
+const log = Files.openFile("/data/events.log", Files.readWrite);
+log.seek(log.length);            // move to end
+log.write(`${Date.now()}: boot complete\n`);
+log.close();
+
+// Read 64 bytes from offset 128
+const file = Files.openFile("/data/firmware.bin", Files.read);
+file.seek(128);
+const chunk = file.read(ArrayBuffer, 64);
+file.close();
+trace(`Read ${chunk.byteLength} bytes\n`);
+```
+
+<Note>
+  On most embedded file systems, writing to an existing file is an overwrite starting at the current position. The file is not automatically truncated — call `Files.delete()` and re-create if you need to replace the file with shorter content.
+</Note>
+
+---
+
+## Preference
+
+A lightweight key-value store backed by NVS (non-volatile storage) on ESP32 and equivalent storage on other targets. Values survive deep sleep and power cycles, making `Preference` the right tool for device configuration and user settings.
+
+```javascript
+import Preference from "preference";
+```
+
+Values are organized into **domains** — a namespace string that groups related keys (e.g. `"wifi"`, `"app"`, `"calibration"`). Domains keep keys from colliding across modules.
+
+### Preference.get()
+
+Retrieves a stored value.
+
+<ParamField path="domain" type="string" required>
+  The namespace that owns the key.
+</ParamField>
+
+<ParamField path="key" type="string" required>
+  The name of the preference to read.
+</ParamField>
+
+<ResponseField name="returns" type="string | number | boolean | ArrayBuffer | undefined">
+  The stored value in its original type, or `undefined` if the key does not exist.
+</ResponseField>
+
+```javascript
+import Preference from "preference";
+
+const ssid    = Preference.get("wifi", "ssid");
+const timeout = Preference.get("app", "timeout") ?? 30;
+trace(`SSID: ${ssid}, timeout: ${timeout}s\n`);
+```
+
+### Preference.set()
+
+Stores a value. The type of the value is preserved.
+
+<ParamField path="domain" type="string" required>
+  The namespace for the key.
+</ParamField>
+
+<ParamField path="key" type="string" required>
+  The preference name to write.
+</ParamField>
+
+<ParamField path="value" type="string | number | boolean | ArrayBuffer" required>
+  The value to store. Supported types: `string`, `number` (integer or float), `boolean`, and `ArrayBuffer`.
+</ParamField>
+
+```javascript
+Preference.set("wifi", "ssid",     "MyNetwork");
+Preference.set("wifi", "password", "s3cr3t!");
+Preference.set("app",  "timeout",  30);
+Preference.set("app",  "dark",     true);
+```
+
+### Preference.delete()
+
+Removes a single key from a domain.
+
+<ParamField path="domain" type="string" required>
+  The namespace containing the key.
+</ParamField>
+
+<ParamField path="key" type="string" required>
+  The key to remove.
+</ParamField>
+
+```javascript
+Preference.delete("wifi", "password");
+```
+
+### Preference.keys()
+
+Lists all keys stored in a domain.
+
+<ParamField path="domain" type="string" required>
+  The namespace to enumerate.
+</ParamField>
+
+<ResponseField name="returns" type="string[]">
+  An array of key name strings. Returns an empty array if the domain does not exist or contains no keys.
+</ResponseField>
+
+```javascript
+import Preference from "preference";
+
+const wifiKeys = Preference.keys("wifi");
+trace(`WiFi prefs: ${wifiKeys.join(", ")}\n`);
+// e.g. "ssid, password, bssid"
+
+// Delete all preferences in a domain
+for (const key of Preference.keys("cache"))
+  Preference.delete("cache", key);
+```
+
+---
+
+## Resource
+
+Read-only data bundled directly into the firmware image at build time. Resources consume no writable flash at runtime — the firmware reads them straight from the code partition. Use `Resource` for certificates, font files, lookup tables, and other fixed assets.
+
+```javascript
+import Resource from "Resource";
+```
+
+Declare resources in your project manifest under the `resources` key. The name you use in the manifest is the name you pass to `new Resource()`.
+
+### new Resource()
+
+Opens a named resource.
+
+<ParamField path="name" type="string" required>
+  The resource name as declared in the project manifest.
+</ParamField>
+
+<ResponseField name="returns" type="Resource">
+  A `Resource` object with `read()` and `byteLength`.
+</ResponseField>
+
+### resource.read()
+
+Reads the resource contents.
+
+<ParamField path="type" type="constructor">
+  Pass `String` to return the contents as a string. Omit to return an `ArrayBuffer`.
+</ParamField>
+
+<ResponseField name="returns" type="ArrayBuffer | string">
+  Resource contents.
+</ResponseField>
+
+### resource.byteLength
+
+<ResponseField name="byteLength" type="number">
+  Size of the resource in bytes (read-only).
+</ResponseField>
+
+```javascript
+import Resource from "Resource";
+
+// Read a PEM certificate bundled with the firmware
+const cert    = new Resource("ca-cert.pem");
+trace(`Certificate size: ${cert.byteLength} B\n`);
+const pemText = cert.read(String);
+
+// Read a binary lookup table
+const table = new Resource("gamma-table.bin");
+const data  = table.read(); // ArrayBuffer
+const view  = new Uint8Array(data);
+trace(`First entry: ${view[0]}\n`);
+```
+
+<Note>
+  Resources are read-only. Any attempt to modify resource data (e.g. by casting the `ArrayBuffer` to a `Uint8Array` and writing to it) has no effect — the underlying flash storage is protected.
+</Note>
+
+---
+
+## Flash
+
+Direct access to a named NOR flash partition. Use `Flash` when you need full control over erase and write cycles — for example, when implementing an over-the-air update mechanism or a custom wear-leveled storage format.
+
+```javascript
+import Flash from "flash";
+```
+
+<Note>
+  NOR flash requires an **erase before write**. Erasing operates on whole blocks (`flash.blockSize` bytes at a time) and resets all bits in the block to `1`. Writing can only flip bits from `1` to `0`. Always erase a block before writing new data to it.
+</Note>
+
+### new Flash()
+
+Opens a named flash partition.
+
+<ParamField path="partition" type="string" required>
+  Partition name as defined in the device partition table (e.g. `"xs"`, `"storage"`, `"ota_0"`).
+</ParamField>
+
+<ResponseField name="returns" type="Flash">
+  A `Flash` object exposing `read()`, `write()`, `erase()`, `blockSize`, and `byteLength`.
+</ResponseField>
+
+### flash.read()
+
+Reads bytes from the partition into a buffer.
+
+<ParamField path="buffer" type="ArrayBuffer" required>
+  Destination buffer. Exactly `buffer.byteLength` bytes are read.
+</ParamField>
+
+<ParamField path="offset" type="number" required>
+  Byte offset from the start of the partition to begin reading.
+</ParamField>
+
+### flash.write()
+
+Writes bytes from a buffer into the partition. The target region must have been erased first.
+
+<ParamField path="buffer" type="ArrayBuffer" required>
+  Source data to write. Must be aligned to a 4-byte boundary on most targets.
+</ParamField>
+
+<ParamField path="offset" type="number" required>
+  Byte offset from the start of the partition to begin writing.
+</ParamField>
+
+### flash.erase()
+
+Erases one block of flash beginning at `offset`.
+
+<ParamField path="offset" type="number" required>
+  Byte offset to erase. Must be aligned to `flash.blockSize`.
+</ParamField>
+
+### Properties
+
+<ResponseField name="flash.blockSize" type="number">
+  Size of one erase block in bytes (typically 4096 on ESP32).
+</ResponseField>
+
+<ResponseField name="flash.byteLength" type="number">
+  Total size of the partition in bytes.
+</ResponseField>
+
+```javascript
+import Flash from "flash";
+
+const storage = new Flash("storage");
+trace(`Partition: ${storage.byteLength} B, block: ${storage.blockSize} B\n`);
+
+// Write a 256-byte record at offset 0
+const OFFSET = 0;
+const record = new Uint8Array(256);
+record[0] = 0xA5; // magic byte
+record[1] = 0x01; // version
+
+// Always erase the block before writing
+storage.erase(OFFSET);
+storage.write(record.buffer, OFFSET);
+
+// Read it back
+const readBuf = new ArrayBuffer(256);
+storage.read(readBuf, OFFSET);
+const readView = new Uint8Array(readBuf);
+trace(`Magic: 0x${readView[0].toString(16).toUpperCase()}\n`); // 0xA5
+```
+
+<Tip>
+  To update a single record without erasing an entire block, read the whole block first, modify the record in memory, erase the block, then write the full block back.
+</Tip>
+
+---
+
+## Zip
+
+Read files from a ZIP archive that has been loaded into an `ArrayBuffer` — typically from a `Resource` bundled with your firmware. Use `Zip` to package multiple assets into a single file, simplifying your manifest and reducing overhead.
+
+```javascript
+import Zip from "zip";
+```
+
+### new Zip()
+
+Creates a `Zip` reader from an `ArrayBuffer` containing a valid ZIP archive.
+
+<ParamField path="buffer" type="ArrayBuffer" required>
+  The ZIP archive contents. Obtain this from `Resource.read()`, `Files.read()`, or any other source that returns an `ArrayBuffer`.
+</ParamField>
+
+<ResponseField name="returns" type="Zip">
+  A `Zip` reader with `file()` for looking up entries.
+</ResponseField>
+
+### zip.file()
+
+Looks up a file entry by name within the archive.
+
+<ParamField path="name" type="string" required>
+  The path of the file inside the ZIP archive, as it was stored (case-sensitive, using `/` separators).
+</ParamField>
+
+<ResponseField name="returns" type="ZipEntry | undefined">
+  A `ZipEntry` object if the file exists in the archive, or `undefined` if not found.
+</ResponseField>
+
+<Expandable title="ZipEntry API">
+  <ResponseField name="zipEntry.read(type)" type="method">
+    Reads and decompresses the entry. Pass `String` to return the result as a string, or omit to receive an `ArrayBuffer`.
+  </ResponseField>
+  <ResponseField name="zipEntry.byteLength" type="number">
+    Uncompressed size of the entry in bytes (read-only).
+  </ResponseField>
+</Expandable>
+
+```javascript
+import Zip from "zip";
+import Resource from "Resource";
+
+// Load a ZIP archive bundled with the firmware
+const archiveBuf = new Resource("assets.zip").read();
+const zip        = new Zip(archiveBuf);
+
+// Read a JSON config from inside the archive
+const configEntry = zip.file("config/defaults.json");
+if (configEntry) {
+  const json    = configEntry.read(String);
+  const config  = JSON.parse(json);
+  trace(`Default interval: ${config.interval}\n`);
+}
+
+// Read a binary font from the archive
+const fontEntry = zip.file("fonts/opensans-12.bf");
+if (fontEntry) {
+  trace(`Font size: ${fontEntry.byteLength} B\n`);
+  const fontData = fontEntry.read(); // ArrayBuffer
+  // pass fontData to a rendering engine...
+}
+```
+
+<Tip>
+  Packaging assets as a single `assets.zip` resource rather than individual resources reduces the number of manifest entries and can simplify tooling. On most ESP32 targets, decompression of a few kilobytes is fast enough to do at startup with no perceptible delay.
+</Tip>

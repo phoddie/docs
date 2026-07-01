@@ -1,0 +1,237 @@
+---
+title: "Hardware I/O on Moddable: GPIO, I2C, PWM, and Sensors"
+sidebarTitle: "Hardware I/O"
+description: "Control GPIO pins, read analog sensors, drive servos, and communicate over I2C and PWM using the Moddable SDK hardware pins modules."
+---
+
+The Moddable SDK exposes microcontroller peripherals through a clean, consistent JavaScript API. Whether you are blinking an LED, reading a temperature sensor over I2C, or driving a servo, each peripheral is represented as an object you instantiate with a pin configuration. Event-driven callbacks keep the main loop free while hardware changes trigger your code.
+
+## Prerequisites
+
+Add individual pin modules to your `manifest.json`:
+
+```json
+{
+  "modules": {
+    "*": [
+      "$(MODDABLE)/modules/pins/digital/digital",
+      "$(MODDABLE)/modules/pins/analog/analog"
+    ]
+  }
+}
+```
+
+## Digital Output — LED
+
+Create a `Digital` instance in `Output` mode and call `write` to control the pin voltage:
+
+```javascript
+import Digital from "pins/digital";
+
+const led = new Digital({
+  pin: 2,
+  mode: Digital.Output
+});
+
+led.write(1); // HIGH — LED on
+led.write(0); // LOW  — LED off
+```
+
+<Tip>
+  Pin numbers correspond to the GPIO numbers printed on your development board's silkscreen — not physical pin positions. Check your board's datasheet.
+</Tip>
+
+## Digital Input — Button
+
+Use `Digital.InputPullUp` to enable the internal pull-up resistor. The `onReadable` callback fires whenever the pin level changes:
+
+```javascript
+import Digital from "pins/digital";
+
+const button = new Digital({
+  pin: 0,
+  mode: Digital.InputPullUp,
+  edge: Digital.Rising | Digital.Falling,
+  onReadable() {
+    trace(`Button: ${this.read()}\n`); // 1 = released, 0 = pressed (active-low)
+  }
+});
+```
+
+### Digital input modes
+
+| Mode constant | Pull resistor | Use case |
+|---|---|---|
+| `Digital.Input` | None (floating) | External pull resistor on PCB |
+| `Digital.InputPullUp` | Internal pull-up | Active-low buttons |
+| `Digital.InputPullDown` | Internal pull-down | Active-high signals |
+| `Digital.OpenDrainOutput` | None | Open-drain bus signals |
+
+## Analog Input — Sensor
+
+Read an analog voltage (e.g. from a potentiometer or light-dependent resistor) and receive a value in the range 0–1023:
+
+```javascript
+import Analog from "pins/analog";
+
+const sensor = new Analog({ pin: 34 });
+const value = sensor.read(); // 0 (0 V) to 1023 (~3.3 V)
+
+trace(`Analog: ${value}\n`);
+```
+
+<Note>
+  The Analog module performs a single synchronous read each time you call `.read()`. For continuous monitoring, combine it with `Timer.repeat` (see the [Timer section](#timer-for-periodic-tasks) below).
+</Note>
+
+### Converting to voltage
+
+```javascript
+const voltage = (value / 1023) * 3.3;
+trace(`Voltage: ${voltage.toFixed(2)} V\n`);
+```
+
+## PWM Output — Dimming and Motor Control
+
+Pulse-width modulation lets you simulate an analog voltage on a digital pin. The duty cycle ranges from 0 (always off) to 1023 (always on):
+
+```javascript
+import PWM from "pins/pwm";
+
+const pwm = new PWM({ pin: 15 });
+
+pwm.write(0);    // 0%   duty cycle — fully off
+pwm.write(512);  // 50%  duty cycle — half power
+pwm.write(1023); // 100% duty cycle — fully on
+```
+
+<Steps>
+  <Step title="Fade an LED in">
+    ```javascript
+    import PWM from "pins/pwm";
+    import Timer from "timer";
+
+    const led = new PWM({ pin: 15 });
+    let brightness = 0;
+
+    Timer.repeat(() => {
+      led.write(brightness);
+      brightness = (brightness + 10) % 1024;
+    }, 20);
+    ```
+  </Step>
+  <Step title="Stop the PWM signal">
+    Call `led.close()` when you are done to release the hardware timer resource.
+  </Step>
+</Steps>
+
+## I2C — Reading a Sensor
+
+I2C lets you connect multiple sensors to just two wires (SDA and SCL). Instantiate `I2C` with the bus pins and the sensor's 7-bit address:
+
+```javascript
+import I2C from "pins/i2c";
+
+const sensor = new I2C({ sda: 21, scl: 22, address: 0x48 });
+
+// Point to the temperature register (0x00) then read 2 bytes
+sensor.write(0x00);
+const data = new Uint8Array(2);
+sensor.read(data);
+
+const raw = (data[0] << 8 | data[1]) >> 4;
+trace(`Temperature register: ${raw}\n`);
+```
+
+<Warning>
+  I2C `address` is the 7-bit device address (without the R/W bit). Many datasheets list the 8-bit address — right-shift by 1 if needed. For example, an 8-bit address of `0x90` becomes `0x48`.
+</Warning>
+
+### I2C read/write sequence
+
+<Steps>
+  <Step title="Write register pointer">
+    Call `sensor.write(registerAddress)` to tell the device which register to read from.
+  </Step>
+  <Step title="Read response bytes">
+    Call `sensor.read(buffer)` where `buffer` is a `Uint8Array` sized for the expected response.
+  </Step>
+  <Step title="Decode the result">
+    Combine bytes per the datasheet's register map (e.g. big-endian 12-bit value across two bytes).
+  </Step>
+</Steps>
+
+## Servo
+
+Position a hobby servo by angle (degrees) or pulse width (microseconds):
+
+```javascript
+import Servo from "pins/servo";
+
+const servo = new Servo({ pin: 5 });
+
+servo.write(0);    // fully counter-clockwise (0°)
+servo.write(90);   // centre position (90°)
+servo.write(180);  // fully clockwise (180°)
+
+// Fine control via pulse width
+servo.writeMicroseconds(1500); // 1500 µs = centre on most servos
+```
+
+| Method | Range | Notes |
+|---|---|---|
+| `write(degrees)` | 0–180 | Convenience wrapper |
+| `writeMicroseconds(µs)` | 500–2400 | Direct pulse width control |
+
+## Timer for Periodic Tasks
+
+Use `Timer.repeat` to sample sensors or update outputs at a fixed interval without blocking the event loop:
+
+```javascript
+import Timer from "timer";
+import Analog from "pins/analog";
+
+const sensor = new Analog({ pin: 34 });
+
+Timer.repeat(() => {
+  const value = sensor.read();
+  trace(`Sensor: ${value}\n`);
+}, 500); // every 500 ms
+```
+
+<Tip>
+  `Timer.repeat` returns a timer ID. Store it if you need to cancel the timer later with `Timer.clear(id)`.
+</Tip>
+
+## Combining Peripherals
+
+The following example reads an analog light sensor and adjusts an LED's brightness via PWM:
+
+```javascript
+import Analog from "pins/analog";
+import PWM from "pins/pwm";
+import Timer from "timer";
+
+const lightSensor = new Analog({ pin: 34 });
+const led = new PWM({ pin: 15 });
+
+Timer.repeat(() => {
+  const light = lightSensor.read();        // 0–1023
+  const brightness = 1023 - light;         // invert: dimmer room → brighter LED
+  led.write(brightness);
+}, 100);
+```
+
+## Cleaning Up Resources
+
+Always call `.close()` on pin objects when you are done with them to release hardware resources:
+
+```javascript
+led.close();
+button.close();
+sensor.close();
+```
+
+<Note>
+  On resource-constrained microcontrollers, leaving unused pin instances open can prevent other code from accessing the same peripheral. Make `close()` calls part of your teardown logic.
+</Note>

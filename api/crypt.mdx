@@ -1,0 +1,363 @@
+---
+title: "Moddable Cryptography API — Hash, HMAC, Cipher, RNG"
+sidebarTitle: "Cryptography"
+description: "Compute hashes, generate HMACs, encrypt and decrypt data with AES, and generate cryptographically secure random bytes on Moddable microcontrollers."
+---
+
+The Moddable `crypt` module provides symmetric cryptography primitives that run directly on the microcontroller with no external dependency. You can hash data with SHA-256 or MD5, authenticate messages with HMAC, encrypt payloads with AES (ECB, CBC, CTR, GCM), and generate cryptographically secure random bytes — all from JavaScript.
+
+## Imports
+
+```javascript
+import Digest from "crypt";
+import { HMAC, BlockCipher, StreamCipher, Mode } from "crypt";
+import { Random } from "crypt";
+```
+
+All primitives live in the `"crypt"` module. Import only the constructors you need.
+
+---
+
+## Digest — cryptographic hash functions
+
+`Digest` computes a one-way hash over arbitrary data written in one or more chunks.
+
+```javascript
+const digest = new Digest(algorithm);
+digest.write(data);      // write one chunk (ArrayBuffer or string)
+digest.write(moreData);  // write another chunk
+const hash = digest.close(); // returns ArrayBuffer
+```
+
+<ParamField body="algorithm" type="string" required>
+  Hash algorithm name. One of `"SHA1"`, `"SHA256"`, `"SHA512"`, or `"MD5"`.
+</ParamField>
+
+<ResponseField name="digest.write(data)" type="method">
+  Feed data into the hash state. `data` can be an `ArrayBuffer` or a string (treated as UTF-8). Call as many times as needed.
+</ResponseField>
+
+<ResponseField name="digest.close()" type="method">
+  Finalise the hash and return the digest as an `ArrayBuffer`. The instance cannot be reused after this call.
+</ResponseField>
+
+### Examples
+
+<Tabs>
+  <Tab title="SHA-256">
+    ```javascript
+    import Digest from "crypt";
+
+    const digest = new Digest("SHA256");
+    digest.write(ArrayBuffer.fromString("Hello, Moddable!"));
+    const hash = digest.close(); // 32-byte ArrayBuffer
+
+    // Hex-encode for display
+    const hex = [...new Uint8Array(hash)]
+      .map(b => b.toString(16).padStart(2, "0"))
+      .join("");
+    trace(`SHA-256: ${hex}\n`);
+    ```
+  </Tab>
+  <Tab title="SHA-512">
+    ```javascript
+    import Digest from "crypt";
+
+    const digest = new Digest("SHA512");
+    digest.write(ArrayBuffer.fromString("firmware-payload"));
+    const hash = digest.close(); // 64-byte ArrayBuffer
+    trace(`SHA-512 length: ${hash.byteLength} bytes\n`);
+    ```
+  </Tab>
+  <Tab title="MD5">
+    ```javascript
+    import Digest from "crypt";
+
+    // MD5 is provided for legacy compatibility — prefer SHA-256 for new designs
+    const digest = new Digest("MD5");
+    digest.write(ArrayBuffer.fromString("legacy-data"));
+    const hash = digest.close(); // 16-byte ArrayBuffer
+    ```
+  </Tab>
+  <Tab title="Incremental hashing">
+    ```javascript
+    import Digest from "crypt";
+
+    // Hash a large payload in chunks to avoid holding it all in RAM
+    const digest = new Digest("SHA256");
+    for (const chunk of getChunks()) { // your own async chunk source
+      digest.write(chunk);
+    }
+    const hash = digest.close();
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+  MD5 and SHA-1 are cryptographically broken for collision resistance. Use them only for non-security purposes (e.g. cache keys, legacy protocol compatibility). Use SHA-256 or SHA-512 for all new security-sensitive code.
+</Note>
+
+---
+
+## HMAC — keyed message authentication
+
+`HMAC` combines a hash function with a secret key to produce an unforgeable message authentication code.
+
+```javascript
+import { HMAC } from "crypt";
+import Digest from "crypt";
+
+const hmac = new HMAC(new Digest("SHA256"), keyBuffer);
+hmac.write(messageBuffer);
+const mac = hmac.close(); // ArrayBuffer
+```
+
+<ParamField body="digest" type="Digest instance" required>
+  A `Digest` instance specifying the underlying hash algorithm. Pass `new Digest("SHA256")` for HMAC-SHA-256.
+</ParamField>
+
+<ParamField body="key" type="ArrayBuffer" required>
+  The secret key as an `ArrayBuffer`.
+</ParamField>
+
+<ResponseField name="hmac.write(data)" type="method">
+  Feed message data into the HMAC state. Call multiple times to authenticate large messages.
+</ResponseField>
+
+<ResponseField name="hmac.close()" type="method">
+  Finalise and return the MAC as an `ArrayBuffer`.
+</ResponseField>
+
+```javascript
+import { HMAC } from "crypt";
+import Digest from "crypt";
+
+const key = ArrayBuffer.fromString("super-secret-key");
+const message = ArrayBuffer.fromString('{"sensor":"temp","value":22.5}');
+
+const hmac = new HMAC(new Digest("SHA256"), key);
+hmac.write(message);
+const mac = hmac.close(); // 32-byte ArrayBuffer
+
+// Compare with expected MAC before trusting a received message
+```
+
+<Tip>
+  Use HMAC to authenticate MQTT payloads, validate firmware update packages, or sign webhook requests — anywhere you need proof that a message came from a party that knows the secret key.
+</Tip>
+
+---
+
+## BlockCipher — AES, DES, 3DES
+
+`BlockCipher` encrypts and decrypts individual fixed-size blocks. AES is the right choice for almost all new designs.
+
+```javascript
+import { BlockCipher } from "crypt";
+```
+
+```javascript
+new BlockCipher(algorithm, key)
+```
+
+<ParamField body="algorithm" type="string" required>
+  Cipher algorithm: `"AES"`, `"DES"`, or `"3DES"`.
+</ParamField>
+
+<ParamField body="key" type="ArrayBuffer" required>
+  Key material. AES supports 16 bytes (AES-128), 24 bytes (AES-192), or 32 bytes (AES-256). DES uses 8 bytes; 3DES uses 24 bytes.
+</ParamField>
+
+<ResponseField name="cipher.encrypt(block)" type="method">
+  Encrypt one block. `block` must be exactly `blockSize` bytes (16 bytes for AES, 8 bytes for DES/3DES). Returns the ciphertext as an `ArrayBuffer`.
+</ResponseField>
+
+<ResponseField name="cipher.decrypt(block)" type="method">
+  Decrypt one block. Returns the plaintext as an `ArrayBuffer`.
+</ResponseField>
+
+```javascript
+import { BlockCipher } from "crypt";
+
+const key = new Uint8Array(16).fill(0x42).buffer; // 128-bit key
+const cipher = new BlockCipher("AES", key);
+
+const plaintext = new Uint8Array(16).fill(0xAB).buffer; // one 16-byte block
+const ciphertext = cipher.encrypt(plaintext);
+const recovered  = cipher.decrypt(ciphertext);
+```
+
+<Note>
+  Raw `BlockCipher` operates in ECB mode — each block is encrypted independently. ECB leaks patterns in data. For real-world payloads, always use a mode from `Mode` (CBC, CTR, or GCM) described below.
+</Note>
+
+---
+
+## Mode — cipher modes (CBC, CTR, GCM)
+
+Cipher modes chain blocks together and accept arbitrary-length input. Wrap a `BlockCipher` instance in a `Mode`:
+
+```javascript
+import { BlockCipher, Mode } from "crypt";
+```
+
+### CBC — Cipher Block Chaining
+
+CBC requires an initialisation vector (IV) and pads the input to a block boundary.
+
+```javascript
+import { BlockCipher, Mode, Random } from "crypt";
+
+const rng = new Random();
+const key = rng.get(16); // 128-bit AES key
+const iv  = rng.get(16); // 128-bit IV — generate fresh for every encryption
+
+const cbc = new Mode.CBC(new BlockCipher("AES", key), iv);
+const ciphertext = cbc.encrypt(plaintextBuffer);
+cbc.close();
+```
+
+<ParamField body="blockCipher" type="BlockCipher" required>
+  An initialised `BlockCipher` instance.
+</ParamField>
+
+<ParamField body="iv" type="ArrayBuffer" required>
+  Initialisation vector — must be `blockSize` bytes. Generate a new random IV for each encryption operation and transmit it alongside the ciphertext.
+</ParamField>
+
+### CTR — Counter mode
+
+CTR turns the block cipher into a stream cipher. No padding is needed; the nonce plays the role of the IV.
+
+```javascript
+const ctr = new Mode.CTR(new BlockCipher("AES", key), nonce);
+const ciphertext = ctr.encrypt(plaintextBuffer);
+ctr.close();
+```
+
+### GCM — Galois/Counter Mode (authenticated encryption)
+
+GCM encrypts and authenticates simultaneously. `close()` returns the authentication tag; verify it before using the decrypted output.
+
+```javascript
+import { BlockCipher, Mode } from "crypt";
+
+const key   = new Uint8Array(16).fill(1).buffer;
+const nonce = new Uint8Array(12).fill(2).buffer; // 96-bit nonce for GCM
+
+// Encrypt
+const gcmEnc = new Mode.GCM(new BlockCipher("AES", key), nonce);
+const ciphertext = gcmEnc.encrypt(plaintextBuffer);
+const tag = gcmEnc.close(); // 16-byte authentication tag
+
+// Decrypt — verify tag before trusting plaintext
+const gcmDec = new Mode.GCM(new BlockCipher("AES", key), nonce);
+const plaintext = gcmDec.decrypt(ciphertext);
+const checkTag  = gcmDec.close();
+// compare tag with checkTag byte-by-byte before using plaintext
+```
+
+<Tip>
+  GCM is the recommended mode for authenticated encryption. It simultaneously provides confidentiality (via CTR) and integrity (via GHASH), making it ideal for securing sensor data or firmware update payloads.
+</Tip>
+
+---
+
+## StreamCipher — RC4, ChaCha20
+
+Stream ciphers operate on arbitrary-length data byte-by-byte. The encrypt operation is in-place.
+
+```javascript
+import { StreamCipher } from "crypt";
+
+const key = ArrayBuffer.fromString("0123456789abcdef"); // 16 bytes
+const rc4 = new StreamCipher("RC4", key);
+const data = ArrayBuffer.fromString("plaintext");
+rc4.encrypt(data); // data is modified in-place
+```
+
+<ParamField body="algorithm" type="string" required>
+  `"RC4"` or `"ChaCha20"`.
+</ParamField>
+
+<ParamField body="key" type="ArrayBuffer" required>
+  Key material. RC4 accepts 1–256 bytes (40–128 bits is typical); ChaCha20 requires 32 bytes.
+</ParamField>
+
+<ResponseField name="cipher.encrypt(buffer)" type="method">
+  XOR the buffer with the keystream in place. The same call decrypts (XOR is its own inverse).
+</ResponseField>
+
+<Note>
+  RC4 has known cryptographic weaknesses and should not be used for new protocols. Prefer ChaCha20 or AES-GCM.
+</Note>
+
+---
+
+## Random — cryptographically secure random bytes
+
+Use `Random` to generate unpredictable key material, IVs, nonces, and tokens.
+
+```javascript
+import { Random } from "crypt";
+
+const rng = new Random();
+const bytes = rng.get(32); // returns a 32-byte ArrayBuffer
+```
+
+<ParamField body="byteCount" type="number" required>
+  Number of random bytes to generate.
+</ParamField>
+
+<ResponseField name="rng.get(n)" type="method">
+  Return an `ArrayBuffer` of `n` cryptographically secure random bytes drawn from the hardware RNG.
+</ResponseField>
+
+### Key generation pattern
+
+Always generate fresh keys and IVs with `Random` rather than hardcoding them:
+
+```javascript
+import { Random, BlockCipher, Mode } from "crypt";
+
+const rng   = new Random();
+const key   = rng.get(16); // 128-bit AES key
+const nonce = rng.get(12); // 96-bit GCM nonce
+
+const gcm = new Mode.GCM(new BlockCipher("AES", key), nonce);
+const ciphertext = gcm.encrypt(ArrayBuffer.fromString("sensor reading"));
+const tag = gcm.close();
+
+// Transmit: nonce + ciphertext + tag
+// The recipient needs the same key (pre-shared or from key exchange)
+```
+
+---
+
+## Reference — algorithm comparison
+
+<Accordion title="Hash algorithm output sizes">
+  | Algorithm | Output size | Notes |
+  |-----------|------------|-------|
+  | `"MD5"` | 16 bytes | Legacy only — do not use for security |
+  | `"SHA1"` | 20 bytes | Legacy — avoid for new designs |
+  | `"SHA256"` | 32 bytes | Recommended for most use cases |
+  | `"SHA512"` | 64 bytes | Higher security margin; larger output |
+</Accordion>
+
+<Accordion title="AES key sizes">
+  | Key size | Variant | Security level |
+  |----------|---------|---------------|
+  | 16 bytes | AES-128 | 128 bits — adequate for most IoT applications |
+  | 24 bytes | AES-192 | 192 bits |
+  | 32 bytes | AES-256 | 256 bits — highest security |
+</Accordion>
+
+<Accordion title="Cipher mode selection guide">
+  | Mode | Authenticated? | Padding required? | Use when |
+  |------|---------------|------------------|---------|
+  | ECB | No | Yes | Never (patterns leak) |
+  | CBC | No | Yes | Legacy interop only |
+  | CTR | No | No | Stream-like encryption without authentication |
+  | GCM | Yes | No | Recommended — confidentiality + integrity |
+</Accordion>

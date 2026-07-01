@@ -1,0 +1,96 @@
+---
+title: "Moddable SDK: JavaScript Development for Microcontrollers"
+sidebarTitle: "Introduction"
+description: "The Moddable SDK brings standard JavaScript to low-cost microcontrollers. Build IoT apps with networking, graphics, hardware I/O, and a full debugger."
+---
+
+The Moddable SDK is an open-source development platform that lets you write modern JavaScript applications for microcontrollers — the tiny, low-power chips inside smart appliances, wearables, and connected devices. Instead of learning proprietary embedded languages or complex C toolchains, you use the same JavaScript you already know, backed by a purpose-built runtime that runs on devices with as little as 45 KB of RAM.
+
+<CardGroup cols={2}>
+  <Card title="Install on macOS" icon="apple" href="/getting-started/install-macos">
+    Set up the Moddable SDK on macOS with Xcode
+  </Card>
+  <Card title="Install on Windows" icon="windows" href="/getting-started/install-windows">
+    Set up the Moddable SDK on Windows with Visual Studio
+  </Card>
+  <Card title="Install on Linux" icon="linux" href="/getting-started/install-linux">
+    Set up the Moddable SDK on Ubuntu or Raspberry Pi Desktop
+  </Card>
+  <Card title="Your First App" icon="rocket" href="/getting-started/first-app">
+    Build and run your first app on the simulator
+  </Card>
+</CardGroup>
+
+## What you can build
+
+The Moddable SDK includes everything you need to create production-quality embedded applications:
+
+<CardGroup cols={2}>
+  <Card title="Networking" icon="wifi" href="/guides/networking">
+    HTTP, WebSockets, MQTT, BLE, Wi-Fi, and TLS on the device
+  </Card>
+  <Card title="Graphics & UI" icon="display" href="/guides/graphics">
+    Bitmap rendering, animated UIs, touch input, and fonts
+  </Card>
+  <Card title="Hardware I/O" icon="microchip" href="/guides/hardware-io">
+    GPIO, I2C, SPI, PWM, analog inputs, and servo motors
+  </Card>
+  <Card title="Mods" icon="puzzle-piece" href="/core-concepts/mods">
+    Installable JavaScript extensions that update without reflashing
+  </Card>
+</CardGroup>
+
+## How it works
+
+At the core of the Moddable SDK is the **XS JavaScript engine** — the only JavaScript engine that achieves greater than 99% conformance with the ES2025 standard on microcontrollers. XS compiles your JavaScript to bytecode and stores modules in ROM, minimizing the RAM used at runtime.
+
+You describe your application in a **manifest.json** file that lists your modules, resources, and platform-specific settings. The **mcconfig** build tool reads that manifest, compiles your code, and flashes it to your device (or launches it in the desktop simulator).
+
+<Steps>
+  <Step title="Install the SDK">
+    Clone the repository, set environment variables, and build the tools on your OS.
+  </Step>
+  <Step title="Write your app">
+    Create JavaScript modules and a `manifest.json` that describes your project.
+  </Step>
+  <Step title="Build and deploy">
+    Run `mcconfig -d -m -p <platform>` to compile and flash your application.
+  </Step>
+  <Step title="Debug with xsbug">
+    Use the xsbug debugger to set breakpoints, inspect variables, and profile memory in real time.
+  </Step>
+</Steps>
+
+## Supported hardware
+
+The Moddable SDK runs on a wide range of microcontroller families:
+
+| Family | Boards |
+|--------|--------|
+| **ESP32** | Moddable Two, Moddable Six, M5Stack, NodeMCU ESP32 |
+| **ESP8266** | Moddable One, Moddable Three, NodeMCU |
+| **nRF52** | Moddable Four, Nordic DK, SparkFun, Adafruit, Seeed XIAO |
+| **Raspberry Pi Pico** | Pico W, Pimoroni Pico Display, LILYGO T-Display |
+| **Zephyr** | Any Zephyr-supported board |
+| **Simulator** | macOS, Linux, Windows desktop |
+
+<Note>
+  New to microcontroller development? Start with the desktop simulator — it lets you build and test applications on your computer without any hardware.
+</Note>
+
+## Explore the documentation
+
+<CardGroup cols={2}>
+  <Card title="Core Concepts" icon="book" href="/core-concepts/manifest">
+    Learn about manifests, the XS engine, Mods, and build tools
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/base">
+    Full reference for all JavaScript module APIs
+  </Card>
+  <Card title="Device Guides" icon="circuit-board" href="/devices/overview">
+    Platform-specific setup for ESP32, nRF52, Pico, and more
+  </Card>
+  <Card title="xsbug Debugger" icon="bug" href="/debugging/xsbug">
+    Debug your apps with breakpoints, call stacks, and memory profiling
+  </Card>
+</CardGroup>

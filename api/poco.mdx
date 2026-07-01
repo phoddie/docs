@@ -1,0 +1,362 @@
+---
+title: "Poco Renderer: 2D Scanline Drawing for Microcontrollers"
+sidebarTitle: "Poco"
+description: "Draw rectangles, bitmaps, and text on microcontroller displays using Poco, the Moddable SDK's efficient scanline display list renderer."
+---
+
+Poco is the Moddable SDK's primary 2D renderer. It works as a scanline display list: you open a frame with `begin()`, issue drawing commands, then close the frame with `end()` — at which point Poco renders every command row-by-row and pushes pixels directly to your display driver. Because Poco requires no full framebuffer, it runs efficiently on devices with only tens of kilobytes of RAM.
+
+## Setup
+
+Import Poco from the Commodetto package:
+
+```javascript
+import Poco from "commodetto/Poco";
+```
+
+Include the Commodetto manifest in your `manifest.json`:
+
+```json
+{
+  "include": ["$(MODDABLE)/examples/manifest_commodetto.json"]
+}
+```
+
+---
+
+## Creating a Poco instance
+
+```javascript
+const poco = new Poco(screen, options);
+```
+
+<ParamField path="screen" type="object" required>
+  The global `screen` object provided by the Moddable runtime. It represents the physical display driver.
+</ParamField>
+
+<ParamField path="options" type="object">
+  Configuration options for this Poco instance.
+
+  <Expandable title="options">
+    <ParamField path="displayListLength" type="number">
+      Maximum size in bytes of the internal drawing command buffer. Increase this if you hit display list overflow errors with complex scenes. Defaults to `1024`.
+    </ParamField>
+
+    <ParamField path="rotation" type="number">
+      Rotate the output coordinate system. Accepted values: `0`, `90`, `180`, `270`. Defaults to `0`.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+### Properties
+
+<ResponseField name="width" type="number">
+  Display width in pixels (after any rotation is applied). Read-only.
+</ResponseField>
+
+<ResponseField name="height" type="number">
+  Display height in pixels (after any rotation is applied). Read-only.
+</ResponseField>
+
+---
+
+## The drawing cycle
+
+Every rendering pass must be wrapped in a `begin` / `end` pair. Poco does not draw anything to the screen until you call `end()`.
+
+```javascript
+poco.begin(x, y, width, height);
+  // drawing calls here
+poco.end();
+```
+
+<ParamField path="x" type="number">
+  Left edge of the update region. Defaults to `0`.
+</ParamField>
+
+<ParamField path="y" type="number">
+  Top edge of the update region. Defaults to `0`.
+</ParamField>
+
+<ParamField path="width" type="number">
+  Width of the update region. Defaults to `poco.width`.
+</ParamField>
+
+<ParamField path="height" type="number">
+  Height of the update region. Defaults to `poco.height`.
+</ParamField>
+
+<Note>
+  Always pass an update region that is as small as possible. Updating only the changed area is one of the most effective ways to reduce rendering time on a microcontroller.
+</Note>
+
+---
+
+## Colors
+
+Poco uses packed color values produced by `makeColor`. Create all your colors once and reuse them — `makeColor` involves a calculation that you don't want to repeat every frame.
+
+```javascript
+poco.makeColor(r, g, b)
+```
+
+<ParamField path="r" type="number" required>
+  Red channel, 0–255.
+</ParamField>
+
+<ParamField path="g" type="number" required>
+  Green channel, 0–255.
+</ParamField>
+
+<ParamField path="b" type="number" required>
+  Blue channel, 0–255.
+</ParamField>
+
+Returns a packed color value appropriate for the display's pixel format.
+
+```javascript
+const red    = poco.makeColor(255, 0,   0);
+const green  = poco.makeColor(0,   255, 0);
+const blue   = poco.makeColor(0,   0,   255);
+const white  = poco.makeColor(255, 255, 255);
+const black  = poco.makeColor(0,   0,   0);
+const gray   = poco.makeColor(128, 128, 128);
+```
+
+---
+
+## Drawing rectangles
+
+### fillRectangle
+
+Fill a solid rectangle with a color.
+
+```javascript
+poco.fillRectangle(color, x, y, width, height);
+```
+
+<ParamField path="color" type="number" required>
+  Packed color from `makeColor`.
+</ParamField>
+
+<ParamField path="x" type="number" required>Left edge in pixels.</ParamField>
+<ParamField path="y" type="number" required>Top edge in pixels.</ParamField>
+<ParamField path="width" type="number" required>Width in pixels.</ParamField>
+<ParamField path="height" type="number" required>Height in pixels.</ParamField>
+
+### blendRectangle
+
+Fill a rectangle with a color blended over the existing pixels (alpha compositing).
+
+```javascript
+poco.blendRectangle(color, blend, x, y, width, height);
+```
+
+<ParamField path="color" type="number" required>
+  Packed color from `makeColor`.
+</ParamField>
+
+<ParamField path="blend" type="number" required>
+  Alpha value, 0 (fully transparent) to 255 (fully opaque).
+</ParamField>
+
+<ParamField path="x" type="number" required>Left edge.</ParamField>
+<ParamField path="y" type="number" required>Top edge.</ParamField>
+<ParamField path="width" type="number" required>Width in pixels.</ParamField>
+<ParamField path="height" type="number" required>Height in pixels.</ParamField>
+
+### Example — clear the screen, draw a semi-transparent overlay
+
+```javascript
+const bg      = poco.makeColor(30, 30, 30);
+const overlay = poco.makeColor(0, 120, 255);
+
+poco.begin();
+  poco.fillRectangle(bg, 0, 0, poco.width, poco.height);
+  poco.blendRectangle(overlay, 128, 20, 20, 100, 60); // 50% blue box
+poco.end();
+```
+
+---
+
+## Drawing bitmaps
+
+### drawBitmap
+
+Draw a color bitmap (e.g., decoded from JPEG or PNG) at a position on the display.
+
+```javascript
+// Draw the full bitmap
+poco.drawBitmap(bitmap, x, y);
+
+// Draw a sub-region of the bitmap
+poco.drawBitmap(bitmap, x, y, sx, sy, sw, sh);
+```
+
+<ParamField path="bitmap" type="Bitmap" required>
+  A [`Bitmap`](/api/commodetto#bitmap) object, typically produced by a JPEG or PNG decoder.
+</ParamField>
+
+<ParamField path="x" type="number" required>Destination x on the display.</ParamField>
+<ParamField path="y" type="number" required>Destination y on the display.</ParamField>
+<ParamField path="sx" type="number">Source x within the bitmap (sub-region).</ParamField>
+<ParamField path="sy" type="number">Source y within the bitmap (sub-region).</ParamField>
+<ParamField path="sw" type="number">Source width (sub-region).</ParamField>
+<ParamField path="sh" type="number">Source height (sub-region).</ParamField>
+
+### drawGray
+
+Draw a grayscale or monochrome bitmap tinted with a color. Use this for mask-based icons and glyphs.
+
+```javascript
+poco.drawGray(bitmap, color, x, y);
+poco.drawGray(bitmap, color, x, y, sx, sy, sw, sh);
+```
+
+<ParamField path="bitmap" type="Bitmap" required>
+  A grayscale or monochrome `Bitmap` used as a mask.
+</ParamField>
+
+<ParamField path="color" type="number" required>
+  The tint color applied to non-zero mask pixels.
+</ParamField>
+
+<ParamField path="x" type="number" required>Destination x.</ParamField>
+<ParamField path="y" type="number" required>Destination y.</ParamField>
+
+### drawBitmapWithKeyColor
+
+Draw a CLUT-indexed bitmap and treat one palette entry as transparent.
+
+```javascript
+poco.drawBitmapWithKeyColor(bitmap, x, y, keyColor);
+```
+
+<ParamField path="bitmap" type="Bitmap" required>
+  A `Bitmap.CLUT16` format bitmap.
+</ParamField>
+
+<ParamField path="x" type="number" required>Destination x.</ParamField>
+<ParamField path="y" type="number" required>Destination y.</ParamField>
+
+<ParamField path="keyColor" type="number" required>
+  The palette index (0–15) to treat as fully transparent.
+</ParamField>
+
+### Example — draw a photo, then an icon overlay
+
+```javascript
+import JPEG     from "commodetto/JPEG";
+import PNG      from "commodetto/PNG";
+import Resource from "Resource";
+
+const photo = new JPEG(new Resource("background.jpg")).read();
+const icon  = new PNG(new Resource("star.png")).read();
+
+poco.begin();
+  poco.drawBitmap(photo, 0, 0);
+  // Draw only the top-left 32×32 region of the icon at position (4, 4)
+  poco.drawBitmap(icon, 4, 4, 0, 0, 32, 32);
+poco.end();
+```
+
+---
+
+## Drawing text
+
+### drawText
+
+Draw a UTF-8 string using a BMFont bitmap font.
+
+```javascript
+// Unbounded — draw the full string
+poco.drawText(string, font, color, x, y);
+
+// Bounded — truncate if wider than maxWidth pixels
+poco.drawText(string, font, color, x, y, maxWidth);
+```
+
+<ParamField path="string" type="string" required>
+  The text to render.
+</ParamField>
+
+<ParamField path="font" type="object" required>
+  A font descriptor returned by [`parseBMF`](/api/commodetto#bmfont-parser).
+</ParamField>
+
+<ParamField path="color" type="number" required>
+  Packed color from `makeColor`.
+</ParamField>
+
+<ParamField path="x" type="number" required>Left edge of the text baseline area.</ParamField>
+<ParamField path="y" type="number" required>Top edge of the text baseline area.</ParamField>
+
+<ParamField path="maxWidth" type="number">
+  Maximum pixel width before the string is clipped. Omit for no truncation.
+</ParamField>
+
+### Measuring text
+
+Before drawing, use `getTextWidth` to measure a string so you can center or right-align it:
+
+```javascript
+const w = poco.getTextWidth(string, font);
+```
+
+<ParamField path="string" type="string" required>The string to measure.</ParamField>
+<ParamField path="font" type="object" required>Font descriptor from `parseBMF`.</ParamField>
+
+Returns the width in pixels.
+
+### Example — centered text
+
+```javascript
+import parseBMF  from "commodetto/parseBMF";
+import Resource  from "Resource";
+
+const font  = parseBMF(new Resource("OpenSans-Regular-20.bf4"));
+const white = poco.makeColor(255, 255, 255);
+const label = "Hello, Moddable!";
+
+const textW = poco.getTextWidth(label, font);
+const x     = (poco.width - textW) >> 1; // integer center
+
+poco.begin();
+  poco.fillRectangle(poco.makeColor(0, 0, 0), 0, 0, poco.width, poco.height);
+  poco.drawText(label, font, white, x, 50);
+poco.end();
+```
+
+---
+
+## Full example
+
+The following example renders a complete screen: a dark background, a decoded photo, a semi-transparent status bar, and a centered label.
+
+```javascript
+import Poco     from "commodetto/Poco";
+import JPEG     from "commodetto/JPEG";
+import parseBMF from "commodetto/parseBMF";
+import Resource from "Resource";
+
+const poco  = new Poco(screen, { displayListLength: 2048 });
+const font  = parseBMF(new Resource("OpenSans-Regular-20.bf4"));
+const photo = new JPEG(new Resource("photo.jpg")).read();
+
+const black  = poco.makeColor(0,   0,   0);
+const white  = poco.makeColor(255, 255, 255);
+const navy   = poco.makeColor(0,   0,   80);
+
+const label  = "Device Ready";
+const labelW = poco.getTextWidth(label, font);
+
+poco.begin();
+  poco.drawBitmap(photo, 0, 0);
+  poco.blendRectangle(navy, 180, 0, poco.height - 30, poco.width, 30);
+  poco.drawText(label, font, white, (poco.width - labelW) >> 1, poco.height - 26);
+poco.end();
+```
+
+<Tip>
+  Increase `displayListLength` in small increments (e.g., 256 bytes at a time) until overflow errors stop. A larger display list uses more RAM but supports more drawing commands per frame.
+</Tip>

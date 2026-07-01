@@ -1,0 +1,269 @@
+---
+title: "Files and Storage on Moddable: Flash, Prefs, and More"
+sidebarTitle: "Files & Storage"
+description: "Read and write files, persist key-value preferences, access bundled resources, and interact with raw flash partitions using the Moddable SDK storage APIs."
+---
+
+Microcontrollers do not have a traditional operating-system filesystem, but the Moddable SDK provides several storage layers to match different use cases: a file API for general-purpose read/write, a lightweight key-value preference store, a read-only resource system for build-time assets, raw NOR flash access, and ZIP archive reading.
+
+## Storage Layers at a Glance
+
+| API | Use case | Writable | Survives reboot |
+|---|---|---|---|
+| `Files` | General-purpose file storage | ✅ | ✅ |
+| `Preference` | Small configuration values | ✅ | ✅ |
+| `Resource` | Read-only assets bundled at build time | ❌ | ✅ |
+| `Flash` | Raw NOR flash partition access | ✅ | ✅ |
+| `Zip` | Reading assets from a ZIP archive | ❌ | ✅ |
+
+## Files API
+
+The `Files` module provides a POSIX-like interface for reading and writing named files on the device's persistent storage (typically a small SPI flash filesystem).
+
+### Writing and reading
+
+```javascript
+import Files from "files";
+
+// Write a string to a file
+Files.write("/data.txt", "Hello, World!");
+
+// Read it back as a string
+const content = Files.read("/data.txt", String);
+trace(content + "\n"); // Hello, World!
+```
+
+Pass `ArrayBuffer` instead of `String` to work with binary data:
+
+```javascript
+const buffer = new ArrayBuffer(4);
+new Uint32Array(buffer)[0] = 0xDEADBEEF;
+
+Files.write("/blob.bin", buffer);
+const raw = Files.read("/blob.bin", ArrayBuffer);
+```
+
+### Checking existence and deleting
+
+```javascript
+if (Files.exists("/data.txt")) {
+  trace("File found\n");
+  Files.delete("/data.txt");
+}
+```
+
+### Renaming a file
+
+```javascript
+Files.rename("/data.txt", "/archive.txt");
+```
+
+### Listing a directory
+
+Iterate over the contents of a directory with `openDirectory`. Each item includes a `name`, `size`, and `mode` field:
+
+```javascript
+const iterator = Files.openDirectory("/");
+let item;
+
+while ((item = iterator.next())) {
+  trace(`${item.name}  ${item.size} bytes  mode=${item.mode}\n`);
+}
+
+iterator.close(); // always close the iterator
+```
+
+<Warning>
+  Always call `iterator.close()` when you finish iterating. Leaving a directory iterator open consumes a file descriptor that may not be available for other operations.
+</Warning>
+
+<Steps>
+  <Step title="Write configuration at first boot">
+    Check for a sentinel file to detect first boot, write defaults, and create the file:
+
+    ```javascript
+    if (!Files.exists("/config.json")) {
+      Files.write("/config.json", JSON.stringify({ volume: 80, brightness: 50 }));
+    }
+    ```
+  </Step>
+  <Step title="Read and parse on subsequent boots">
+    ```javascript
+    const config = JSON.parse(Files.read("/config.json", String));
+    trace(`Volume: ${config.volume}\n`);
+    ```
+  </Step>
+  <Step title="Update a single field">
+    Read, mutate, and write back:
+
+    ```javascript
+    const config = JSON.parse(Files.read("/config.json", String));
+    config.volume = 60;
+    Files.write("/config.json", JSON.stringify(config));
+    ```
+  </Step>
+</Steps>
+
+## Preferences — Key-Value Store
+
+`Preference` is optimised for storing small scalar values (numbers, strings, booleans). It organises values into named **domains** (like namespaces) to avoid key collisions between modules:
+
+```javascript
+import Preference from "preference";
+
+// Write values
+Preference.set("app", "volume", 75);
+Preference.set("wifi", "ssid", "MyNetwork");
+Preference.set("wifi", "password", "secret");
+
+// Read values (returns undefined if not found)
+const volume = Preference.get("app", "volume");
+trace(`Volume: ${volume}\n`); // 75
+
+// List all keys in a domain
+const keys = Preference.keys("app");
+trace(keys.join(", ") + "\n"); // volume
+
+// Delete a single value
+Preference.delete("app", "volume");
+```
+
+<Tip>
+  Use `Preference` instead of `Files` for small configuration values. It is faster, uses less flash wear, and is easier to use when you only need a handful of named settings.
+</Tip>
+
+### Preference value types
+
+| Type | Example |
+|---|---|
+| Integer | `Preference.set("app", "count", 42)` |
+| String | `Preference.set("app", "name", "sensor-1")` |
+| Boolean | `Preference.set("app", "debug", true)` |
+
+<Note>
+  `Preference.get` returns `undefined` (not `null`) when a key does not exist. Use the nullish coalescing operator for safe defaults: `const vol = Preference.get("app", "volume") ?? 50`.
+</Note>
+
+## Resources — Read-Only Build-Time Assets
+
+Bundle images, fonts, certificates, and other static data with your application using `Resource`. These files are stored in flash at build time and cannot be modified at runtime.
+
+```javascript
+import Resource from "Resource";
+
+// Load a font file
+const font = new Resource("OpenSans-Regular-20.bf4");
+
+// Read the raw bytes of a resource
+const data = font.read(ArrayBuffer);
+trace(`Resource size: ${font.byteLength} bytes\n`);
+
+// Load an image
+const image = new Resource("logo.bmp");
+
+// Check if a resource exists before loading
+if (Resource.exists("optional-asset.bmp")) {
+  const asset = new Resource("optional-asset.bmp");
+}
+```
+
+Declare resources in your `manifest.json`:
+
+```json
+{
+  "resources": {
+    "*": [
+      "./resources/OpenSans-Regular-20",
+      "./resources/logo"
+    ]
+  }
+}
+```
+
+<Note>
+  Omit file extensions in the manifest. The build system automatically selects the correct compiled format (`.bf4` for fonts, `.bmp` for images, `.der` for certificates, etc.).
+</Note>
+
+## Flash — Raw Partition Access
+
+Use `Flash` when you need to read or write directly to a named NOR flash partition, bypassing the filesystem entirely. This is useful for firmware update staging or large binary blobs:
+
+```javascript
+import Flash from "flash";
+
+// Open a named partition ("xs" = XS bytecode, "code" = native code)
+const flash = new Flash("xs");
+
+// Read the first block into a buffer
+const block = new Uint8Array(flash.blockSize);
+flash.read(block, 0); // (destination, byteOffset)
+
+trace(`Block size: ${flash.blockSize} bytes\n`);
+trace(`Total size: ${flash.byteLength} bytes\n`);
+```
+
+<Warning>
+  Raw flash writes erase entire blocks (typically 4 KB). Writing even a single byte requires erasing the full block. Always read the block first, modify the in-memory copy, erase, then write back.
+</Warning>
+
+### Flash erase/write cycle
+
+```javascript
+const flash = new Flash("user");
+const block = new Uint8Array(flash.blockSize);
+
+// 1. Read current block
+flash.read(block, 0);
+
+// 2. Modify the in-memory copy
+block[0] = 0x42;
+
+// 3. Erase the block
+flash.erase(0);
+
+// 4. Write the modified data
+flash.write(block, 0);
+```
+
+## ZIP Archives
+
+Pack multiple assets into a single ZIP file bundled as a resource, then read individual files at runtime:
+
+```javascript
+import Zip from "zip";
+import Resource from "Resource";
+
+const zip = new Zip(new Resource("assets.zip"));
+
+// Access a file within the ZIP
+const file = zip.file("images/logo.bmp");
+const data = file.read(ArrayBuffer);
+
+trace(`Read ${data.byteLength} bytes from ZIP\n`);
+```
+
+<Tip>
+  Use ZIP archives to group related assets (e.g. all images for one screen) into a single resource. This simplifies the manifest and can improve build times for projects with many small files.
+</Tip>
+
+### Iterating ZIP contents
+
+```javascript
+const zip = new Zip(new Resource("assets.zip"));
+let entry = zip.first;
+
+while (entry) {
+  trace(`${entry.name} (${entry.length} bytes)\n`);
+  entry = entry.next;
+}
+```
+
+## Choosing the Right Storage API
+
+<Accordion title="When should I use Files vs Preference vs Resource?">
+  - **Resource** — for anything known at build time: fonts, images, certificates, static JSON. Zero runtime cost to "write" because it never changes.
+  - **Preference** — for small user-configurable values that change infrequently: volume, Wi-Fi SSID, display brightness. Values persist across reboots.
+  - **Files** — for data generated at runtime that needs to persist: logs, downloaded content, large JSON blobs, binary sensor data.
+  - **Flash** — when you control the partition layout yourself and need maximum control: OTA firmware staging, large write-once data blobs.
+  - **Zip** — when you want to organise many small read-only assets without cluttering the resource namespace.
+</Accordion>

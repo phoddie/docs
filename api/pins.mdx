@@ -1,0 +1,417 @@
+---
+title: "Moddable Pins API: GPIO, I2C, PWM, and Servo Control"
+sidebarTitle: "Pins"
+description: "Control GPIO pins, read analog sensors, drive PWM outputs, communicate over I2C, and position RC servos using the Moddable Pins API."
+---
+
+The Pins API provides a straightforward interface for hardware I/O on Moddable devices. Each class (`Digital`, `Analog`, `PWM`, `I2C`, `SMBus`, `Servo`) maps directly to a hardware peripheral and follows a consistent pattern: construct with an options object, read or write values, then call `close()` when you're done. All classes are available under the `pins/` module prefix.
+
+<Note>
+  The Pins API is the Moddable-specific hardware abstraction layer. If you're targeting multiple platforms or prefer a standards-based API, consider using the [ECMA-419 IO API](/api/io) instead, which implements the TC53 standard.
+</Note>
+
+---
+
+## Digital
+
+`Digital` controls GPIO (general-purpose input/output) pins. You can configure a pin as an output to drive LEDs, relays, or logic signals, or as an input — optionally with a pull-up or pull-down resistor — to read buttons, switches, and other digital sensors.
+
+### Import
+
+```javascript
+import Digital from "pins/digital";
+```
+
+### Constructor
+
+```javascript
+const pin = new Digital(options);
+```
+
+<ParamField path="options.pin" type="number" required>
+  GPIO pin number on the physical device.
+</ParamField>
+
+<ParamField path="options.mode" type="number" required>
+  Pin mode constant. See the [mode table](#pin-modes) below.
+</ParamField>
+
+<ParamField path="options.edge" type="number">
+  Edge trigger for interrupt-driven inputs. Combine `Digital.Rising` and `Digital.Falling` with `|`. Required when providing an `onReadable` callback.
+</ParamField>
+
+<ParamField path="options.onReadable" type="function">
+  Callback fired when the pin changes state (interrupt-driven). Inside the callback, call `this.read()` to get the current value.
+</ParamField>
+
+### Pin modes
+
+| Constant | Direction | Description |
+|---|---|---|
+| `Digital.Input` | In | Floating input — no pull resistor |
+| `Digital.InputPullUp` | In | Input with internal pull-up resistor |
+| `Digital.InputPullDown` | In | Input with internal pull-down resistor |
+| `Digital.Output` | Out | Standard push-pull output |
+| `Digital.OpenDrainOutput` | Out | Open-drain output |
+
+### Methods
+
+<ResponseField name="write(value)" type="void">
+  Set the output state. Pass `1` for high and `0` for low.
+</ResponseField>
+
+<ResponseField name="read()" type="number">
+  Return the current pin state: `1` for high, `0` for low.
+</ResponseField>
+
+<ResponseField name="close()" type="void">
+  Release the pin and free associated resources.
+</ResponseField>
+
+### Examples
+
+<Tabs>
+  <Tab title="Output — blink LED">
+    ```javascript
+    import Digital from "pins/digital";
+    import Timer   from "timer";
+
+    const led = new Digital({ pin: 2, mode: Digital.Output });
+    let   state = 0;
+
+    Timer.repeat(() => {
+      state ^= 1;
+      led.write(state);
+    }, 500);
+    ```
+  </Tab>
+  <Tab title="Input polling">
+    ```javascript
+    import Digital from "pins/digital";
+
+    const button = new Digital({ pin: 0, mode: Digital.InputPullUp });
+    const pressed = button.read() === 0; // active-low button
+    trace(`Button ${pressed ? "pressed" : "released"}\n`);
+    button.close();
+    ```
+  </Tab>
+  <Tab title="Interrupt-driven input">
+    ```javascript
+    import Digital from "pins/digital";
+
+    const button = new Digital({
+      pin: 0,
+      mode: Digital.InputPullUp,
+      edge: Digital.Rising | Digital.Falling,
+      onReadable() {
+        const val = this.read();
+        trace(`Pin 0 changed: ${val}\n`);
+      }
+    });
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Analog
+
+`Analog` reads voltages on ADC (analog-to-digital converter) pins and returns a digital value proportional to the voltage.
+
+### Import
+
+```javascript
+import Analog from "pins/analog";
+```
+
+### Constructor
+
+```javascript
+const adc = new Analog({ pin: 34 });
+```
+
+<ParamField path="options.pin" type="number" required>
+  ADC-capable pin number.
+</ParamField>
+
+### Methods
+
+<ResponseField name="read()" type="number">
+  Read the current analog value. Returns an integer in the range **0–1023** (10-bit resolution). `0` corresponds to 0 V; `1023` corresponds to the reference voltage (typically 3.3 V).
+</ResponseField>
+
+### Example — read a potentiometer
+
+```javascript
+import Analog from "pins/analog";
+import Timer  from "timer";
+
+const pot = new Analog({ pin: 34 });
+
+Timer.repeat(() => {
+  const raw     = pot.read();              // 0–1023
+  const voltage = (raw / 1023) * 3.3;     // approximate volts
+  trace(`ADC: ${raw} (~${voltage.toFixed(2)} V)\n`);
+}, 200);
+```
+
+<Note>
+  ADC accuracy varies by device. On the ESP32, pins 34–39 are input-only ADC pins; check your device's pinout before wiring.
+</Note>
+
+---
+
+## PWM
+
+`PWM` generates a pulse-width-modulated signal on a GPIO pin. Use it to control LED brightness, motor speed, or any other analog-like output.
+
+### Import
+
+```javascript
+import PWM from "pins/pwm";
+```
+
+### Constructor
+
+```javascript
+const pwm = new PWM({ pin: 15 });
+// With a specific PWM frequency:
+const pwm = new PWM({ pin: 15, hz: 5000 });
+```
+
+<ParamField path="options.pin" type="number" required>
+  PWM-capable GPIO pin number.
+</ParamField>
+
+<ParamField path="options.hz" type="number">
+  PWM carrier frequency in hertz. Defaults to a platform-specific value (typically 1000 Hz).
+</ParamField>
+
+### Methods
+
+<ResponseField name="write(value)" type="void">
+  Set the duty cycle. Accepts an integer from **0** (always off) to **1023** (always on). A value of `512` produces a 50% duty cycle.
+</ResponseField>
+
+<ResponseField name="close()" type="void">
+  Stop PWM output and release the pin.
+</ResponseField>
+
+### Example — fade an LED
+
+```javascript
+import PWM   from "pins/pwm";
+import Timer from "timer";
+
+const led   = new PWM({ pin: 15, hz: 1000 });
+let   value = 0;
+let   delta = 10;
+
+Timer.repeat(() => {
+  led.write(value);
+  value += delta;
+  if (value >= 1023 || value <= 0) delta = -delta;
+}, 20);
+```
+
+---
+
+## I2C
+
+`I2C` implements the two-wire I2C serial protocol. Use it to communicate with sensors, display controllers, and other peripherals that use I2C.
+
+### Import
+
+```javascript
+import I2C from "pins/i2c";
+```
+
+### Constructor
+
+```javascript
+const i2c = new I2C({ sda: 21, scl: 22, address: 0x48 });
+```
+
+<ParamField path="options.sda" type="number" required>
+  GPIO pin number for the SDA (data) line.
+</ParamField>
+
+<ParamField path="options.scl" type="number" required>
+  GPIO pin number for the SCL (clock) line.
+</ParamField>
+
+<ParamField path="options.address" type="number" required>
+  7-bit I2C address of the target device (e.g., `0x48`).
+</ParamField>
+
+<ParamField path="options.hz" type="number">
+  Bus frequency in hertz. Defaults to `100000` (100 kHz). Use `400000` for fast mode.
+</ParamField>
+
+### Methods
+
+<ResponseField name="write(...bytes)" type="void">
+  Write one or more bytes to the device. Each argument is a byte value (0–255). You can also pass an `ArrayBuffer` or typed array.
+</ResponseField>
+
+<ResponseField name="read(buffer | count)" type="void">
+  Read bytes from the device. Pass a `Uint8Array` or `ArrayBuffer` to fill, or a byte count. Returns the filled buffer when passing a count.
+</ResponseField>
+
+<ResponseField name="close()" type="void">
+  Release the I2C bus.
+</ResponseField>
+
+### Example — read a TMP102 temperature sensor
+
+```javascript
+import I2C from "pins/i2c";
+
+const sensor = new I2C({ sda: 21, scl: 22, address: 0x48 });
+
+// Point to temperature register (0x00)
+sensor.write(0x00);
+
+// Read 2 bytes
+const buf   = new Uint8Array(2);
+sensor.read(buf);
+
+// Convert to Celsius (TMP102 format)
+const raw  = ((buf[0] << 4) | (buf[1] >> 4));
+const temp = raw * 0.0625;
+trace(`Temperature: ${temp.toFixed(1)} °C\n`);
+
+sensor.close();
+```
+
+---
+
+## SMBus
+
+`SMBus` extends `I2C` with convenience methods for register-based read/write operations — the pattern used by most I2C sensors and actuators.
+
+### Import
+
+```javascript
+import SMBus from "pins/smbus";
+```
+
+### Constructor
+
+```javascript
+const smbus = new SMBus({ sda: 21, scl: 22, address: 0x48 });
+```
+
+Accepts the same options as `I2C`.
+
+### Methods
+
+<ResponseField name="readByte(register)" type="number">
+  Read a single byte from the specified register address.
+</ResponseField>
+
+<ResponseField name="readWord(register)" type="number">
+  Read a 16-bit word (little-endian) from the specified register address.
+</ResponseField>
+
+<ResponseField name="readBlock(register, count, buffer)" type="Uint8Array">
+  Read `count` bytes starting at `register` into `buffer`.
+</ResponseField>
+
+<ResponseField name="writeByte(register, value)" type="void">
+  Write a single byte to the specified register address.
+</ResponseField>
+
+<ResponseField name="writeWord(register, value)" type="void">
+  Write a 16-bit word (little-endian) to the specified register address.
+</ResponseField>
+
+<ResponseField name="writeBlock(register, ...bytes)" type="void">
+  Write multiple bytes starting at the specified register address.
+</ResponseField>
+
+### Example — configure and read an MCP9808 temperature sensor
+
+```javascript
+import SMBus from "pins/smbus";
+
+const sensor = new SMBus({ sda: 21, scl: 22, address: 0x18 });
+
+// Set resolution to maximum (register 0x08, value 0x03)
+sensor.writeByte(0x08, 0x03);
+
+// Read 16-bit temperature register (0x05)
+const raw  = sensor.readWord(0x05);
+
+// Parse MCP9808 two's complement format
+const sign = (raw & 0x1000) ? -1 : 1;
+const temp = sign * ((raw & 0x0FFF) * 0.0625);
+trace(`Temperature: ${temp.toFixed(2)} °C\n`);
+
+sensor.close();
+```
+
+---
+
+## Servo
+
+`Servo` drives RC servo motors using standard PWM pulse timing.
+
+### Import
+
+```javascript
+import Servo from "pins/servo";
+```
+
+### Constructor
+
+```javascript
+const servo = new Servo({ pin: 5 });
+```
+
+<ParamField path="options.pin" type="number" required>
+  GPIO pin number connected to the servo signal wire.
+</ParamField>
+
+<ParamField path="options.min" type="number">
+  Minimum pulse width in microseconds. Defaults to `500`.
+</ParamField>
+
+<ParamField path="options.max" type="number">
+  Maximum pulse width in microseconds. Defaults to `2400`.
+</ParamField>
+
+### Methods
+
+<ResponseField name="write(degrees)" type="void">
+  Move the servo to a position in degrees. Accepted range: **0–180**.
+</ResponseField>
+
+<ResponseField name="writeMicroseconds(us)" type="void">
+  Move the servo to a position specified as a pulse width in microseconds. Typical range: **500–2400 µs**. Use this for finer control than integer degrees.
+</ResponseField>
+
+<ResponseField name="close()" type="void">
+  Stop the servo signal and release the pin.
+</ResponseField>
+
+### Example — sweep a servo
+
+```javascript
+import Servo from "pins/servo";
+import Timer from "timer";
+
+const servo = new Servo({ pin: 5 });
+let   angle = 0;
+let   delta = 5;
+
+Timer.repeat(() => {
+  servo.write(angle);
+  angle += delta;
+  if (angle >= 180 || angle <= 0) delta = -delta;
+}, 50);
+```
+
+<Tip>
+  Call `servo.close()` when the servo has reached its target position if you don't need it to hold. This stops the PWM signal and can reduce current draw on battery-powered projects.
+</Tip>

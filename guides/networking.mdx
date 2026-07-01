@@ -1,0 +1,245 @@
+---
+title: "Networking on Moddable: Wi-Fi, HTTP, WebSocket, MQTT"
+sidebarTitle: "Networking"
+description: "Connect your Moddable device to Wi-Fi and communicate over HTTP, WebSocket, MQTT, and DNS using the Moddable SDK's networking APIs."
+---
+
+The Moddable SDK provides a full networking stack designed for microcontrollers — from low-level DNS lookups to high-level MQTT pub/sub. All networking runs asynchronously via callback-based APIs, so your device stays responsive while waiting for network activity.
+
+## Prerequisites
+
+Add the networking manifest to your project's `manifest.json` to pull in the required modules:
+
+```json
+{
+  "include": [
+    "$(MODDABLE)/examples/manifest_net.json"
+  ]
+}
+```
+
+## Connecting to Wi-Fi
+
+Before making any network request, establish a Wi-Fi connection. The `WiFi.connect` call accepts credentials and a status callback that fires as the connection progresses.
+
+```javascript
+import WiFi from "wifi";
+import Net from "net";
+
+WiFi.connect({ ssid: "MyNetwork", password: "secret" }, (msg, code) => {
+  if ("gotIP" === msg) {
+    trace(`IP: ${Net.get("IP")}\n`);
+    // Safe to make network requests from here
+  }
+  if ("disconnect" === msg) {
+    trace(`Disconnected: ${code}\n`);
+  }
+});
+```
+
+<Note>
+  Place all network code inside the `"gotIP"` branch. Attempting HTTP or socket connections before the device has an IP address will fail silently.
+</Note>
+
+### Key connection messages
+
+| Message | Meaning |
+|---|---|
+| `"connect"` | Associated with the access point |
+| `"gotIP"` | DHCP lease obtained — safe to use the network |
+| `"disconnect"` | Connection lost; `code` contains the reason |
+
+## Making HTTP Requests
+
+### GET request
+
+```javascript
+import { HTTPRequest } from "http";
+
+new HTTPRequest({
+  host: "example.com",
+  path: "/api/data",
+  response: String,
+}, (msg, value, etc) => {
+  if (msg === HTTPRequest.responseComplete) {
+    trace(value + "\n"); // full response body as a string
+  }
+  if (msg < 0) {
+    trace(`Error: ${value}\n`);
+  }
+});
+```
+
+### POST request
+
+Send JSON (or any body) by setting `method`, `headers`, and `body`:
+
+```javascript
+import { HTTPRequest } from "http";
+
+new HTTPRequest({
+  host: "api.example.com",
+  path: "/data",
+  method: "POST",
+  headers: ["Content-Type", "application/json"],
+  body: JSON.stringify({ sensor: "temp", value: 22.5 }),
+  response: String,
+}, (msg, value) => {
+  if (msg === HTTPRequest.responseComplete) {
+    trace(value + "\n");
+  }
+});
+```
+
+<Tip>
+  Set `response: String` to receive the body as a JavaScript string. Use `response: ArrayBuffer` when you need raw binary data.
+</Tip>
+
+### HTTP callback messages
+
+| Message | Meaning |
+|---|---|
+| `HTTPRequest.responseStatus` | HTTP status code received |
+| `HTTPRequest.responseHeaders` | Response headers received |
+| `HTTPRequest.responseFragment` | A fragment of the response body is available |
+| `HTTPRequest.responseComplete` | Entire body available in `value` |
+| Negative value | Network or protocol error |
+
+### HTTPS
+
+Secure requests require `SecureSocket` and a CA certificate. See the [Security guide](/guides/security) for the full setup.
+
+## WebSocket Client
+
+Open a persistent bidirectional connection with `WebSocketClient`:
+
+```javascript
+import { WebSocketClient } from "websocket";
+
+const ws = new WebSocketClient({
+  host: "echo.websocket.org",
+  path: "/"
+}, (msg, value) => {
+  if (msg === WebSocketClient.connect) {
+    ws.write("hello");
+  }
+  if (msg === WebSocketClient.receive) {
+    trace(`Received: ${value}\n`);
+  }
+  if (msg === WebSocketClient.disconnect) {
+    trace("Disconnected\n");
+  }
+});
+```
+
+<Steps>
+  <Step title="Wait for connect">
+    Send messages only after `WebSocketClient.connect` fires. Writing before the handshake completes throws an error.
+  </Step>
+  <Step title="Send messages">
+    Call `ws.write(data)` with a string or `ArrayBuffer`.
+  </Step>
+  <Step title="Handle incoming frames">
+    The `WebSocketClient.receive` message delivers each incoming frame in `value`.
+  </Step>
+  <Step title="Handle disconnects">
+    On `WebSocketClient.disconnect`, decide whether to reconnect by creating a new `WebSocketClient` instance.
+  </Step>
+</Steps>
+
+## MQTT
+
+MQTT is well-suited for IoT telemetry. Connect to any standards-compliant broker:
+
+```javascript
+import MQTT from "mqtt";
+
+const client = new MQTT({
+  host: "broker.hivemq.com",
+  id: "moddable-device-1",
+  port: 1883
+}, (msg, value) => {
+  switch (msg) {
+    case MQTT.connected:
+      client.subscribe("test/topic");
+      client.publish("test/topic", "hello from device");
+      break;
+    case MQTT.message:
+      trace(`Message: ${value}\n`);
+      break;
+    case MQTT.closed:
+      trace("Connection to broker closed\n");
+      break;
+  }
+});
+```
+
+<Note>
+  Each device needs a unique `id`. Duplicate client IDs on the same broker cause one client to be disconnected when the other connects.
+</Note>
+
+### MQTT callback messages
+
+| Message | Meaning |
+|---|---|
+| `MQTT.connected` | Broker accepted the connection |
+| `MQTT.message` | Subscribed topic received a message |
+| `MQTT.closed` | Connection to broker lost |
+
+## mDNS Service Discovery
+
+Advertise your device on the local network so other devices can find it by name:
+
+```javascript
+import mDNS from "mdns";
+
+const mdns = new mDNS({ hostName: "mydevice" });
+
+// Advertise an HTTP service on port 80
+mdns.add({ name: "mydevice", protocol: "_http", port: 80 });
+```
+
+Other devices on the same network can now reach your device at `mydevice.local`.
+
+## DNS Lookup
+
+Resolve hostnames manually when you need the IP address directly:
+
+```javascript
+import DNS from "dns";
+
+DNS.resolve("example.com", DNS.A, (name, address) => {
+  trace(`${name} → ${address}\n`);
+});
+```
+
+<Warning>
+  DNS resolution is asynchronous. Use the resolved address only inside the callback — it is not available synchronously after calling `DNS.resolve`.
+</Warning>
+
+## Network Utilities
+
+Use `Net` to inspect the current network state:
+
+```javascript
+import Net from "net";
+
+trace(`IP:   ${Net.get("IP")}\n`);
+trace(`MAC:  ${Net.get("MAC")}\n`);
+trace(`SSID: ${Net.get("SSID")}\n`);
+trace(`RSSI: ${Net.get("RSSI")}\n`);
+```
+
+## Choosing the Right Protocol
+
+<Accordion title="Which protocol should I use?">
+  | Scenario | Recommended protocol |
+  |---|---|
+  | Fetching data from a REST API | HTTP GET |
+  | Submitting sensor readings to a server | HTTP POST or MQTT |
+  | Real-time bidirectional communication | WebSocket |
+  | Pub/sub telemetry at scale | MQTT |
+  | Local network service discovery | mDNS |
+
+  MQTT is the most battery- and bandwidth-efficient option for periodic sensor reporting. WebSocket is better when you need low-latency two-way messages.
+</Accordion>

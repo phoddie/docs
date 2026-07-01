@@ -1,0 +1,135 @@
+---
+title: "Install the Moddable SDK on macOS: Complete Setup Guide"
+sidebarTitle: "macOS"
+description: "Set up the Moddable SDK on macOS, build the native developer tools from source, and verify your install by running the helloworld example."
+---
+
+The Moddable SDK runs on macOS Sierra (10.12) and newer. The setup process clones the repository, configures your shell environment, and compiles the native build tools — including the xsbug JavaScript debugger — from source. Allow 10–20 minutes for the full Xcode and build steps.
+
+<Warning>
+  You need the **full Xcode application**, not just the Xcode Command Line Tools. The Command Line Tools package alone is missing components required by the build.
+</Warning>
+
+## Prerequisites
+
+- macOS Sierra (10.12) or newer
+- Full Xcode installation (download from the Mac App Store or [developer.apple.com/xcode](https://developer.apple.com/xcode/))
+
+## Installation
+
+<Steps>
+  <Step title="Install and launch Xcode">
+    Download Xcode from [developer.apple.com/xcode](https://developer.apple.com/xcode/) and install it. After installation, **launch Xcode at least once** so it can present the license agreement and install any additional components it requires.
+
+    <Note>
+      Skipping the first launch is the most common source of build errors. Xcode must complete its initial setup before the tools can use it.
+    </Note>
+  </Step>
+
+  <Step title="Create a Projects directory">
+    Create the directory where you will clone the Moddable repository:
+
+    ```bash
+    mkdir -p ~/Projects
+    ```
+  </Step>
+
+  <Step title="Clone the Moddable repository">
+    ```bash
+    cd ~/Projects
+    git clone https://github.com/Moddable-OpenSource/moddable
+    ```
+  </Step>
+
+  <Step title="Configure your shell environment">
+    Open your shell configuration file. Choose the command that matches your macOS version:
+
+    <CodeGroup>
+      ```bash macOS Catalina and later (zsh)
+      open ~/.zshrc
+      ```
+
+      ```bash macOS Mojave and earlier (bash)
+      open ~/.profile
+      ```
+    </CodeGroup>
+
+    Add the following lines to the file, replacing `<user>` with your macOS username, then save and close it:
+
+    ```bash
+    export MODDABLE="/Users/<user>/Projects/moddable"
+    export PATH="${MODDABLE}/build/bin/mac/release:$PATH"
+    ```
+  </Step>
+
+  <Step title="Apply the environment changes">
+    Open a **new terminal tab or window** so the environment variables you just added take effect. All subsequent commands must run in this new session.
+  </Step>
+
+  <Step title="Build the Moddable tools">
+    Compile the SDK's native build tools:
+
+    ```bash
+    cd ${MODDABLE}/build/makefiles/mac
+    make
+    ```
+
+    This step compiles `mcconfig`, `mcrun`, `xsbug`, and other tools. It may take several minutes to complete.
+  </Step>
+
+  <Step title="Launch xsbug">
+    Open the xsbug JavaScript debugger to confirm it built successfully:
+
+    ```bash
+    open ${MODDABLE}/build/bin/mac/release/xsbug.app
+    ```
+
+    xsbug should open as a desktop application. Leave it running for the next step.
+  </Step>
+
+  <Step title="Run the helloworld verification">
+    Build and run the helloworld example on the macOS simulator:
+
+    ```bash
+    cd ${MODDABLE}/examples/helloworld
+    mcconfig -d -m -p mac
+    ```
+
+    You should see `Hello, World` printed in the xsbug console. A successful run confirms your installation is complete.
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### `xcode-select: tool 'ibtool' requires Xcode`
+
+This error means the build system cannot find a valid full Xcode installation. There are three common causes:
+
+1. **Only the Command Line Tools are installed** — download and install the full Xcode app.
+2. **Xcode's license has not been accepted** — launch Xcode and accept the agreement.
+3. **The active developer directory points to the wrong location** — run:
+
+```bash
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+```
+
+## Updating the SDK
+
+When a new version of the Moddable SDK is released, pull the latest changes and rebuild the tools:
+
+```bash
+cd $MODDABLE
+git pull
+
+rm -rf build/bin build/tmp
+
+cd ${MODDABLE}/build/makefiles/mac
+make
+
+cd ${MODDABLE}/examples/helloworld
+mcconfig -d -m -p mac
+```
+
+<Tip>
+  After updating, always re-run the helloworld example to confirm the new build is working before flashing to a device.
+</Tip>

@@ -1,0 +1,115 @@
+---
+title: "nRF52 Developer Guide for the Moddable JavaScript SDK"
+sidebarTitle: "nRF52"
+description: "Install the nRF5 SDK and ARM toolchain, then build and flash Moddable SDK BLE apps for Moddable Four, Nordic DK, SparkFun, Adafruit, and more."
+---
+
+The Nordic nRF52 family pairs an ARM Cortex-M4 core with BLE 5.0 radio hardware and best-in-class low-power modes. This makes it the right choice when your application runs on a battery for months or years, or when you need Bluetooth connectivity without the overhead of Wi-Fi. The Moddable SDK supports a broad range of nRF52840-based boards, including Moddable's own ePaper-equipped Moddable Four.
+
+## Supported boards
+
+| Board | Platform identifier | Notes |
+|---|---|---|
+| Moddable Four | `nrf52/moddable_four` | nRF52840, ePaper display, BLE |
+| Nordic DK pca10056 | `nrf52/nordic_pca10056` | Official Nordic development kit |
+| SparkFun Pro nRF52840 | `nrf52/sparkfun_pro_nrf52840` | USB-C, USB DFU bootloader |
+| Adafruit ItsyBitsy nRF52840 | `nrf52/adafruit_itsybitsy` | Compact form factor, USB |
+| Seeed XIAO nRF52840 | `nrf52/seeed_xiao` | Tiny footprint, battery connector |
+| Makerdiary MDK | `nrf52/makerdiary_mdk` | SWD debug headers exposed |
+
+## nRF52840 key specifications
+
+- **Core:** ARM Cortex-M4F at 64 MHz
+- **RAM:** 256 KB
+- **Flash:** 1 MB
+- **Radio:** BLE 5.0, IEEE 802.15.4 (Thread/Zigbee)
+- **USB:** Full-speed USB 2.0 (device)
+
+## Prerequisites
+
+<Steps>
+  <Step title="Install the Moddable SDK tools">
+    Follow the [Getting Started guide](/getting-started) to install `mcconfig` and the Moddable toolchain before proceeding.
+  </Step>
+  <Step title="Install the GNU Arm Embedded Toolchain">
+    Download `arm-none-eabi-gcc` from [https://developer.arm.com/tools-and-software/open-source-software/developer-tools/gnu-toolchain/gnu-rm](https://developer.arm.com/tools-and-software/open-source-software/developer-tools/gnu-toolchain/gnu-rm) and add the `bin` directory to your `PATH`.
+
+    Verify the installation:
+
+    ```bash
+    arm-none-eabi-gcc --version
+    ```
+  </Step>
+  <Step title="Install the nRF5 SDK">
+    Download the nRF5 SDK from Nordic Semiconductor at [https://www.nordicsemi.com/Products/Development-software/nRF5-SDK](https://www.nordicsemi.com/Products/Development-software/nRF5-SDK) and extract it to a convenient location such as `~/nrf5/nRF5_SDK`.
+  </Step>
+  <Step title="Install nrfjprog (for JTAG/SWD flashing)">
+    Download the **nRF Command Line Tools** from Nordic's website to get `nrfjprog`. This tool is required for flashing over JTAG or SWD using a J-Link probe.
+
+    For boards with a USB DFU bootloader (SparkFun Pro, Adafruit ItsyBitsy, Seeed XIAO), you can skip this step and use DFU over USB instead.
+  </Step>
+  <Step title="Set environment variables">
+    Add the following to your shell profile:
+
+    ```bash
+    export NRF52_SDK_PATH=~/nrf5/nRF5_SDK
+    export GNU_PREFIX=arm-none-eabi
+    ```
+
+    Reload your profile or open a new terminal after saving.
+  </Step>
+  <Step title="Connect the board">
+    Connect your board via USB. If using a J-Link probe for SWD, attach it to the SWD header and connect the probe to your host via USB.
+  </Step>
+</Steps>
+
+## Build and flash
+
+```bash
+# Moddable Four
+mcconfig -d -m -p nrf52/moddable_four
+
+# Nordic DK pca10056
+mcconfig -d -m -p nrf52/nordic_pca10056
+
+# SparkFun Pro nRF52840
+mcconfig -d -m -p nrf52/sparkfun_pro_nrf52840
+
+# Adafruit ItsyBitsy nRF52840
+mcconfig -d -m -p nrf52/adafruit_itsybitsy
+
+# Seeed XIAO nRF52840
+mcconfig -d -m -p nrf52/seeed_xiao
+
+# Makerdiary MDK
+mcconfig -d -m -p nrf52/makerdiary_mdk
+```
+
+`mcconfig` compiles your application, links it against the nRF5 SDK, and flashes it using `nrfjprog` or the USB DFU path depending on the board configuration.
+
+## Low-power operation
+
+The nRF52 is designed for battery-powered devices. The Moddable SDK exposes deep sleep through the `sleep` module. Call `deepSleep` to halt the CPU and radio until a timer or external event wakes the device:
+
+```js
+import { deepSleep } from "sleep";
+
+// Sleep for 30 seconds, then restart
+deepSleep(30000);
+```
+
+<Note>
+  `deepSleep` does not return — the device resets when it wakes. Store any state you need to preserve in non-volatile storage before calling it.
+</Note>
+
+<Tip>
+  Combine deep sleep with BLE advertising intervals tuned for your use case. Advertising at 1-second intervals while sleeping between events can reduce average current consumption to single-digit microamps on many nRF52840 boards.
+</Tip>
+
+## Debugging with xsbug
+
+Run `mcconfig` with the `-d` flag to enable the xsbug connection. On nRF52, xsbug communicates over the USB serial port or the SWD RTT channel depending on your board configuration. Open xsbug before the device boots to see all startup output.
+
+<Warning>
+  Deep sleep disconnects the xsbug session. Disable deep sleep calls during active debugging sessions to keep the connection alive.
+</Warning>

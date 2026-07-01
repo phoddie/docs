@@ -1,0 +1,215 @@
+---
+title: "Moddable SDK Data Modules: Base64, Hex, ArrayBuffer"
+sidebarTitle: "Data"
+description: "Encode and decode binary data with Base64 and hexadecimal, plus built-in XS extensions for converting between strings and ArrayBuffers."
+---
+
+The data modules provide encoding and decoding utilities for moving binary data across text-based protocols, serial consoles, and storage layers. Both `Base64` and `Hex` operate on `ArrayBuffer` values — the native binary container in the XS JavaScript engine — and pair naturally with the built-in `ArrayBuffer` and `String` extensions described at the bottom of this page.
+
+## Base64
+
+Encode binary data to a Base64 string and decode it back. Base64 is commonly used when transmitting binary payloads over MQTT, HTTP, or storing them in JSON.
+
+```javascript
+import Base64 from "base64";
+```
+
+### Base64.encode()
+
+Encodes an `ArrayBuffer` to a Base64-encoded string.
+
+<ParamField path="buffer" type="ArrayBuffer" required>
+  The binary data to encode.
+</ParamField>
+
+<ResponseField name="returns" type="string">
+  A standard Base64 string (RFC 4648 alphabet, with `=` padding).
+</ResponseField>
+
+```javascript
+import Base64 from "base64";
+
+const buffer  = ArrayBuffer.fromString("Hello, World!");
+const encoded = Base64.encode(buffer);
+
+trace(`${encoded}\n`); // SGVsbG8sIFdvcmxkIQ==
+```
+
+### Base64.decode()
+
+Decodes a Base64 string back to an `ArrayBuffer`.
+
+<ParamField path="string" type="string" required>
+  A valid Base64-encoded string. Padding characters (`=`) are required.
+</ParamField>
+
+<ResponseField name="returns" type="ArrayBuffer">
+  The decoded binary data.
+</ResponseField>
+
+```javascript
+import Base64 from "base64";
+
+const encoded = "SGVsbG8sIFdvcmxkIQ==";
+const decoded = Base64.decode(encoded);
+
+trace(`${String.fromArrayBuffer(decoded)}\n`); // Hello, World!
+```
+
+### Round-trip example
+
+```javascript
+import Base64 from "base64";
+
+// Encode a firmware version struct as Base64 for MQTT transmission
+const payload = new Uint8Array([0x01, 0x04, 0x00, 0x2A]).buffer;
+const message = Base64.encode(payload);
+mqttClient.publish("device/version", message);
+
+// Decode on the receiving side
+const received = Base64.decode(message);
+const view     = new DataView(received);
+trace(`Version: ${view.getUint8(0)}.${view.getUint8(1)}.${view.getUint8(2)}\n`); // 1.4.0
+```
+
+<Note>
+  `Base64.encode()` accepts any `ArrayBuffer`, including the `.buffer` property of typed arrays like `Uint8Array`, `Int16Array`, and `DataView`.
+</Note>
+
+---
+
+## Hex
+
+Convert binary data to and from hexadecimal strings. Hex encoding is widely used for representing MAC addresses, cryptographic hashes, and device identifiers.
+
+```javascript
+import Hex from "hex";
+```
+
+### Hex.toString()
+
+Encodes an `ArrayBuffer` as an uppercase hexadecimal string.
+
+<ParamField path="buffer" type="ArrayBuffer" required>
+  The binary data to encode.
+</ParamField>
+
+<ParamField path="separator" type="string">
+  An optional single character inserted between each byte pair. Common choices are `":"` (MAC addresses) and `" "` (human-readable dumps).
+</ParamField>
+
+<ResponseField name="returns" type="string">
+  An uppercase hex string with one two-character sequence per byte. When a `separator` is provided, it appears between every pair — but not before the first or after the last byte.
+</ResponseField>
+
+```javascript
+import Hex from "hex";
+
+const buf = new Uint8Array([0xDE, 0xAD, 0xBE, 0xEF]).buffer;
+
+trace(Hex.toString(buf) + "\n");        // DEADBEEF
+trace(Hex.toString(buf, ":") + "\n");   // DE:AD:BE:EF
+trace(Hex.toString(buf, " ") + "\n");   // DE AD BE EF
+```
+
+### Hex.toBuffer()
+
+Decodes a hexadecimal string to an `ArrayBuffer`.
+
+<ParamField path="string" type="string" required>
+  A hex-encoded string. Characters must be valid hexadecimal digits (`0–9`, `A–F`, `a–f`). Separator characters are not supported — strip them before calling this function.
+</ParamField>
+
+<ResponseField name="returns" type="ArrayBuffer">
+  The decoded binary data. The output length is exactly half the input length in bytes.
+</ResponseField>
+
+```javascript
+import Hex from "hex";
+
+const buf = Hex.toBuffer("DEADBEEF");
+const view = new DataView(buf);
+
+trace(`First byte: 0x${view.getUint8(0).toString(16).toUpperCase()}\n`); // 0xDE
+```
+
+### Working with MAC addresses
+
+```javascript
+import Hex from "hex";
+
+// Read a 6-byte MAC address from hardware and format it
+const macBytes = getMacAddress(); // returns ArrayBuffer
+const macString = Hex.toString(macBytes, ":");
+trace(`MAC: ${macString}\n`); // e.g. A4:CF:12:74:E0:3B
+
+// Parse a MAC address string back to bytes
+const stripped = macString.split(":").join("");   // remove colons
+const macBuf   = Hex.toBuffer(stripped);
+```
+
+<Tip>
+  When parsing hex strings received from external sources (user input, MQTT payloads, etc.), validate the string length before calling `Hex.toBuffer()`. An odd-length string will produce an incomplete last byte.
+</Tip>
+
+---
+
+## ArrayBuffer helpers
+
+The XS engine extends the built-in `ArrayBuffer` and `String` constructors with two additional static methods that make it straightforward to convert between text and binary data. These are available globally — no import needed.
+
+### ArrayBuffer.fromString()
+
+Creates a new `ArrayBuffer` containing the UTF-8 byte representation of a string.
+
+<ParamField path="str" type="string" required>
+  The source string. Each character is encoded as UTF-8.
+</ParamField>
+
+<ResponseField name="returns" type="ArrayBuffer">
+  An `ArrayBuffer` whose byte length equals the UTF-8 encoded length of the input (which may be greater than `str.length` for non-ASCII characters).
+</ResponseField>
+
+```javascript
+const buf = ArrayBuffer.fromString("hello");
+trace(`Byte length: ${buf.byteLength}\n`); // 5
+
+const emoji = ArrayBuffer.fromString("🎉");
+trace(`Emoji bytes: ${emoji.byteLength}\n`); // 4 (UTF-8 encoding)
+```
+
+### String.fromArrayBuffer()
+
+Creates a string from the bytes in an `ArrayBuffer`, interpreting them as UTF-8.
+
+<ParamField path="buffer" type="ArrayBuffer" required>
+  The binary data to decode. Must contain valid UTF-8 bytes.
+</ParamField>
+
+<ResponseField name="returns" type="string">
+  The decoded string.
+</ResponseField>
+
+```javascript
+const buf = new Uint8Array([72, 101, 108, 108, 111]).buffer; // "Hello"
+trace(String.fromArrayBuffer(buf) + "\n"); // Hello
+```
+
+### Chaining with encoding modules
+
+```javascript
+import Base64 from "base64";
+import Hex from "hex";
+
+// Build a JSON payload with binary fields encoded for transport
+const deviceKey = new Uint8Array([0x9F, 0x3A, 0xB2, 0x77, 0xC1, 0x04]).buffer;
+
+const payload = JSON.stringify({
+  id:  "sensor-01",
+  key: Base64.encode(deviceKey),
+  mac: Hex.toString(deviceKey, ":"),
+});
+
+trace(`Payload: ${payload}\n`);
+// {"id":"sensor-01","key":"nzqyd8EE","mac":"9F:3A:B2:77:C1:04"}
+```

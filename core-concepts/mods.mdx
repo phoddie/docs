@@ -1,0 +1,130 @@
+---
+title: "Mods: Installing JavaScript Extensions Without Reflashing"
+sidebarTitle: "Mods"
+description: "Learn how Mods let users install JavaScript extensions on IoT devices without reflashing firmware — securely, portably, and over the air."
+---
+
+Mods are precompiled JavaScript module archives that users install on IoT products after the device has shipped. Instead of reflashing the entire firmware to change behavior, you install a Mod — a small bytecode bundle — directly into flash storage. The host application loads it safely at runtime using a sandboxed Compartment.
+
+## Why Mods matter
+
+Traditional IoT firmware updates replace the entire image on a device, requiring manufacturer involvement and significant download sizes. Mods take a different approach:
+
+- **Portable** — a Mod written against a standard API works on any device from any manufacturer that exposes that API
+- **Secure** — Mods run inside Hardened JavaScript (SES) Compartments, so they cannot access hardware or system state the host has not explicitly granted
+- **Lightweight** — bytecode runs directly from flash without loading into RAM first
+- **OTA capable** — install via a wired connection during development or push over-the-air to deployed devices
+- **Standard** — built on ECMAScript modules and aligned with ECMA-419 / TC53 embedded JavaScript standards
+
+## How Mods work
+
+<Steps>
+  <Step title="Write the Mod as a standard JavaScript module">
+    A Mod is just a normal ECMAScript module. Export what you want the host to call; import only what the host grants you in the Compartment globals.
+
+    ```javascript mod.js
+    export function run() {
+      trace("Hello from a Mod!\n");
+    }
+    ```
+  </Step>
+
+  <Step title="Create a Mod manifest">
+    The Mod needs its own `manifest.json` that inherits from `manifest_mod.json`. This tells `mcrun` to build a Mod archive rather than full firmware.
+
+    ```json manifest.json
+    {
+      "include": ["$(MODDABLE)/examples/manifest_mod.json"],
+      "modules": {
+        "*": "./mod"
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Build and install with mcrun">
+    Use `mcrun` (not `mcconfig`) to compile the Mod to bytecode and install it on the connected device.
+
+    ```bash
+    mcrun -d -m -p esp32 /path/to/mod/manifest.json
+    ```
+
+    The `-d` flag builds in debug mode so you can inspect the Mod with xsbug. The `-m` flag immediately runs `make` after generating the makefile.
+  </Step>
+
+  <Step title="Load the Mod from the host application">
+    The host app creates a `Compartment`, exposes the APIs it wants the Mod to access, and then evaluates the Mod module.
+
+    ```javascript host.js
+    import Compartment from "compartment";
+
+    const c = new Compartment({
+      globals: {
+        trace,
+        Timer: {
+          delay: Timer.delay.bind(Timer)
+        }
+      }
+    });
+
+    c.evaluate(`import "mymod"`);
+    ```
+  </Step>
+</Steps>
+
+## Preparing the host application
+
+For your host firmware to support Mods, its `manifest.json` must include `manifest_mod.json`:
+
+```json manifest.json
+{
+  "include": [
+    "$(MODDABLE)/examples/manifest_base.json",
+    "$(MODDABLE)/examples/manifest_mod.json"
+  ],
+  "modules": {
+    "*": "./main"
+  }
+}
+```
+
+<Note>
+Without `manifest_mod.json` in the host's includes, the Compartment API and the flash storage driver for Mod archives are not compiled in. Build the host firmware before installing any Mods.
+</Note>
+
+## Security model
+
+Every Mod runs inside a Hardened JavaScript Compartment — an isolated global scope that XS creates using the Secure ECMAScript (SES) standard.
+
+<Tabs>
+  <Tab title="What Mods can do">
+    - Use any JavaScript language feature (the full ES2025 spec)
+    - Call APIs explicitly passed via the `globals` option
+    - Import other modules that the host exposes through the Compartment
+    - Maintain their own state between calls
+  </Tab>
+  <Tab title="What Mods cannot do">
+    - Access the host's global scope or any module not explicitly granted
+    - Reach hardware peripherals (GPIO, SPI, I²C, etc.) unless the host passes a handle
+    - Escape the Compartment sandbox through prototype pollution or other attacks
+    - Affect other Mods running in separate Compartments
+  </Tab>
+</Tabs>
+
+<Warning>
+Be deliberate about what you pass into a Compartment's `globals`. Every object you expose is a potential attack surface. Pass the minimum API necessary for the Mod to do its job.
+</Warning>
+
+## Portability across devices
+
+A Mod targets an API surface, not a specific chip or vendor. If two devices from different manufacturers both expose the same host globals (for example, a `Sensor` object with a standard TC53 interface), the same Mod binary runs on both without modification.
+
+This is what makes Mods a viable ecosystem primitive: Mod authors write once, and device manufacturers compete on the quality of the host API they expose.
+
+## OTA installation
+
+During development you install Mods over a USB connection with `mcrun`. For deployed products, the host application can receive a Mod archive over any transport — MQTT, HTTP, BLE — write it to flash, and load it immediately without rebooting.
+
+<Tip>
+Because Mod bytecode runs directly from flash, installation is fast and the device returns to normal operation within milliseconds of the write completing.
+</Tip>

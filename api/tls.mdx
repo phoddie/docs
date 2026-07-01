@@ -1,0 +1,255 @@
+---
+title: "TLS and SecureSocket API — Encrypted Connections"
+sidebarTitle: "TLS"
+description: "Add TLS 1.2 encryption to HTTP, WebSocket, and MQTT connections on Moddable devices using SecureSocket and bundled or custom CA certificates."
+---
+
+`SecureSocket` wraps any underlying TCP socket in a TLS 1.2 handshake and encrypted transport. You pass it as the `Socket` option to `HTTPRequest`, `WebSocketClient`, or `MQTT` — the rest of your code stays the same. Certificates are compiled into the firmware as resources, so no filesystem is required at runtime.
+
+## Import
+
+```javascript
+import SecureSocket from "securesocket";
+```
+
+`SecureSocket` is a drop-in socket class. You never instantiate it directly; you pass the class itself as `Socket` in options objects and the underlying client library handles the rest.
+
+---
+
+## Manifest — including certificates
+
+Certificates live in the firmware image as binary resources. Add the Moddable-supplied root CA bundle to your `manifest.json`:
+
+```json
+{
+  "include": [
+    "$(MODDABLE)/examples/manifest_net.json"
+  ],
+  "resources": {
+    "*": [
+      "$(MODDABLE)/modules/crypt/data/ca_bundle"
+    ]
+  }
+}
+```
+
+The bundled `ca_bundle.der` contains common public root CAs (DigiCert, Let's Encrypt, ISRG Root, and others). For private infrastructure or self-signed certificates, include your own DER-encoded file instead:
+
+```json
+{
+  "resources": {
+    "*": [
+      "./certs/my_root_ca"
+    ]
+  }
+}
+```
+
+<Note>
+  Certificates must be in **DER** (binary) format, not PEM (base64 text). Convert PEM to DER with:
+  `openssl x509 -in cert.pem -outform DER -out cert.der`
+</Note>
+
+---
+
+## The `secure` options object
+
+Pass a `secure` object alongside `Socket: SecureSocket` in any supported client:
+
+<ParamField body="certificate" type="ArrayBuffer | Resource">
+  The CA certificate (or bundle) used to verify the server's certificate chain. Load it with `new Resource("ca_bundle.der")` or supply a raw `ArrayBuffer`.
+</ParamField>
+
+<ParamField body="verify" type="boolean">
+  Whether to verify the server's certificate chain against the provided CA. Defaults to `true`. Set to `false` only during local development — it disables all certificate validation.
+</ParamField>
+
+<ParamField body="trace" type="boolean">
+  When `true`, the TLS layer emits detailed handshake messages via `trace()`. Useful for diagnosing certificate or cipher-suite errors.
+</ParamField>
+
+<ParamField body="clientKey" type="ArrayBuffer">
+  Client private key for mutual TLS (mTLS). Must be provided together with `clientCertificates`.
+</ParamField>
+
+<ParamField body="clientCertificates" type="ArrayBuffer[]">
+  Array of client certificates for mutual TLS. The first entry is the client certificate; subsequent entries are intermediate CAs in chain order.
+</ParamField>
+
+---
+
+## Usage examples
+
+<Tabs>
+  <Tab title="HTTPS request">
+    ```javascript
+    import { HTTPRequest } from "http";
+    import SecureSocket from "securesocket";
+    import Resource from "Resource";
+
+    new HTTPRequest({
+      host: "api.example.com",
+      path: "/v1/sensors",
+      port: 443,
+      Socket: SecureSocket,
+      secure: {
+        certificate: new Resource("ca_bundle.der"),
+        verify: true
+      },
+      response: String
+    }, (msg, value) => {
+      if (msg === HTTPRequest.responseStatus)
+        trace(`Status: ${value}\n`);
+      else if (msg === HTTPRequest.responseComplete)
+        trace(value + "\n");
+      else if (msg < 0)
+        trace(`TLS/network error: ${msg}\n`);
+    });
+    ```
+  </Tab>
+  <Tab title="Secure WebSocket (WSS)">
+    ```javascript
+    import { WebSocketClient } from "websocket";
+    import SecureSocket from "securesocket";
+    import Resource from "Resource";
+
+    const ws = new WebSocketClient({
+      host: "realtime.example.com",
+      port: 443,
+      path: "/stream",
+      Socket: SecureSocket,
+      secure: {
+        certificate: new Resource("ca_bundle.der"),
+        verify: true
+      }
+    }, (msg, value) => {
+      switch (msg) {
+        case WebSocketClient.connect:
+          trace("Secure WebSocket connected\n");
+          ws.write("hello");
+          break;
+        case WebSocketClient.receive:
+          trace(`Message: ${value}\n`);
+          break;
+        case WebSocketClient.disconnect:
+          trace("Disconnected\n");
+          break;
+      }
+    });
+    ```
+  </Tab>
+  <Tab title="MQTT over TLS">
+    ```javascript
+    import MQTT from "mqtt";
+    import SecureSocket from "securesocket";
+    import Resource from "Resource";
+
+    const client = new MQTT({
+      host: "broker.example.com",
+      port: 8883,
+      id: "device-42",
+      Socket: SecureSocket,
+      secure: {
+        certificate: new Resource("ca_bundle.der"),
+        verify: true
+      }
+    }, (msg, value) => {
+      if (msg === MQTT.connected) {
+        trace("Secure MQTT connected\n");
+        client.publish("status", "online");
+      }
+    });
+    ```
+  </Tab>
+  <Tab title="Mutual TLS (mTLS)">
+    ```javascript
+    import { HTTPRequest } from "http";
+    import SecureSocket from "securesocket";
+    import Resource from "Resource";
+
+    new HTTPRequest({
+      host: "internal.example.com",
+      path: "/api/data",
+      port: 443,
+      Socket: SecureSocket,
+      secure: {
+        certificate: new Resource("ca_bundle.der"),
+        verify: true,
+        clientKey: new Resource("client_key.der"),
+        clientCertificates: [new Resource("client_cert.der")]
+      },
+      response: String
+    }, (msg, value) => {
+      if (msg === HTTPRequest.responseComplete)
+        trace(value + "\n");
+    });
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Certificate troubleshooting
+
+<Accordion title="Handshake fails with a negative error code">
+  Enable `trace: true` in your `secure` object to see the raw TLS alert codes:
+
+  ```javascript
+  secure: {
+    certificate: new Resource("ca_bundle.der"),
+    verify: true,
+    trace: true   // prints handshake steps to the debug console
+  }
+  ```
+
+  Common causes:
+  - The server's certificate chain is not covered by `ca_bundle.der` — include a custom CA certificate.
+  - Clock skew — certificates have validity windows. Sync device time with SNTP before making TLS connections.
+  - Cipher suite mismatch — some embedded TLS stacks support a limited cipher set.
+</Accordion>
+
+<Accordion title="Using a self-signed certificate">
+  Export your self-signed certificate in DER format and include it in your resources:
+
+  ```bash
+  openssl x509 -in server.pem -outform DER -out server.der
+  ```
+
+  ```json
+  {
+    "resources": {
+      "*": ["./certs/server"]
+    }
+  }
+  ```
+
+  ```javascript
+  secure: {
+    certificate: new Resource("server.der"),
+    verify: true
+  }
+  ```
+</Accordion>
+
+<Accordion title="Disable verification for local development">
+  You can skip certificate validation entirely while testing against a local server. **Never ship this in production.**
+
+  ```javascript
+  secure: { verify: false } // WARNING: insecure — development only
+  ```
+</Accordion>
+
+---
+
+## Adding custom root CAs
+
+When connecting to servers signed by a private CA (internal tooling, IoT cloud platforms with their own PKI), ship that CA's root certificate alongside your firmware:
+
+1. Obtain the root CA certificate in PEM format.
+2. Convert to DER: `openssl x509 -in root_ca.pem -outform DER -out root_ca.der`
+3. Place `root_ca.der` in your project (e.g. `./certs/root_ca.der`).
+4. Reference it in `manifest.json` resources and load it with `new Resource("root_ca.der")`.
+
+<Tip>
+  Some cloud IoT platforms (AWS IoT, Azure IoT Hub) publish their root CA certificates on their documentation sites in PEM format. Download and convert them as described above.
+</Tip>

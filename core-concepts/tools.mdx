@@ -1,0 +1,220 @@
+---
+title: "Moddable SDK Command-Line Tools: Complete Reference Guide"
+sidebarTitle: "Tools"
+description: "Reference for every Moddable SDK command-line tool — mcconfig, mcrun, xsc, xsl, xsbug, png2bmp, and more — with flags and usage examples."
+---
+
+The Moddable SDK ships a suite of command-line tools that cover the full development cycle: building firmware, compiling JavaScript, linking ROM images, converting assets, debugging, and distributing applications. This page is a reference for each tool.
+
+## mcconfig — build firmware
+
+`mcconfig` is the primary build tool. It reads your `manifest.json`, resolves all modules, resources, and platform settings, and generates a platform-specific makefile.
+
+```bash
+mcconfig [manifest.json] [-d] [-m] [-p <platform>] [-t <target>] [-r <degrees>] [key=value ...]
+```
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-d` | Debug build — connects the device to the xsbug debugger on launch |
+| `-m` | Immediately run `make` after generating the makefile |
+| `-p <platform>` | Target platform (see table below) |
+| `-t clean` | Remove all build artifacts for the project |
+| `-t deploy` | Build and deploy without opening a xsbug connection |
+| `-r <degrees>` | Rotate the display output: `0`, `90`, `180`, or `270` |
+
+### Supported platforms
+
+<Tabs>
+  <Tab title="Desktop simulators">
+    | Value | Platform |
+    |---|---|
+    | `mac` | macOS simulator |
+    | `win` | Windows simulator |
+    | `lin` | Linux simulator |
+  </Tab>
+  <Tab title="Espressif">
+    | Value | Platform |
+    |---|---|
+    | `esp32` | ESP32 |
+    | `esp32s2` | ESP32-S2 |
+    | `esp32s3` | ESP32-S3 |
+    | `esp32c3` | ESP32-C3 |
+    | `esp8266` | ESP8266 |
+  </Tab>
+  <Tab title="Other hardware">
+    | Value | Platform |
+    |---|---|
+    | `nrf52` | Nordic nRF52 |
+    | `pico` | Raspberry Pi Pico (RP2040) |
+    | `zephyr` | Zephyr RTOS targets |
+  </Tab>
+</Tabs>
+
+### Board subplatforms
+
+Append a board identifier after the platform with a `/` to target a specific hardware variant:
+
+```bash
+mcconfig -d -m -p esp32/moddable_two
+mcconfig -d -m -p nrf52/moddable_four
+mcconfig -d -m -p pico/moddable_display_2
+```
+
+### Passing config values
+
+Pass `key=value` pairs at the end of the command to override entries in your manifest's `config` object without editing the file:
+
+```bash
+mcconfig -d -m -p esp32 ssid="MyNetwork" password="s3cr3t"
+```
+
+### Common workflows
+
+<CodeGroup>
+```bash Build for simulator
+mcconfig -d -m -p mac
+```
+
+```bash Build and deploy to ESP32
+mcconfig -d -m -p esp32
+```
+
+```bash Clean build artifacts
+mcconfig -t clean -p esp32
+```
+
+```bash Deploy without debug connection
+mcconfig -t deploy -m -p esp32/moddable_two
+```
+</CodeGroup>
+
+---
+
+## mcrun — build and install Mods
+
+`mcrun` compiles a [Mod](/core-concepts/mods) to bytecode and installs it on a connected device. Use it in place of `mcconfig` when your `manifest.json` describes a Mod rather than full firmware.
+
+```bash
+mcrun -d -m -p <platform> [mod_manifest.json]
+```
+
+The flags behave identically to `mcconfig`. Point `mcrun` at the Mod's `manifest.json`:
+
+```bash
+mcrun -d -m -p esp32 ./mods/my-sensor-mod/manifest.json
+```
+
+<Note>
+The target device must already be running a host firmware that includes `manifest_mod.json`. Install the host firmware with `mcconfig` before using `mcrun` to push Mods.
+</Note>
+
+---
+
+## xsc — JavaScript compiler
+
+`xsc` compiles a single JavaScript source file to XS bytecode (`.xsb`). You rarely invoke it directly — `mcconfig` calls it for every module — but it is useful for inspecting bytecode or scripting custom build steps.
+
+```bash
+xsc source.js -o output.xsb
+```
+
+---
+
+## xsl — JavaScript linker
+
+`xsl` links one or more `.xsb` bytecode files into an XS archive (`.xsa`) and prepares the ROM image used by preloading. Again, `mcconfig` handles this automatically, but you can call it directly for advanced workflows.
+
+```bash
+xsl -a archive.xsa -b output.xsb input1.xsb input2.xsb
+```
+
+The resulting `.xsa` archive is what the XS runtime maps into ROM at startup. See [XS Engine — Preloading](/core-concepts/xs-engine#preloading-modules-into-rom) for details on how this reduces RAM usage.
+
+---
+
+## png2bmp — image converter
+
+Moddable apps use BMP bitmaps rather than PNGs at runtime. `png2bmp` converts source PNG images into the BMP format expected by Commodetto and Piu, with optional rotation and alpha-channel handling.
+
+```bash
+png2bmp [-r <degrees>] [-a <alpha>] input.png output.bmp
+```
+
+| Flag | Description |
+|---|---|
+| `-r <degrees>` | Rotate the image: `90`, `180`, or `270` |
+| `-a <alpha>` | Alpha channel handling mode |
+
+<Tip>
+Run `png2bmp` as a pre-build step to keep source assets in PNG (easy to edit) while shipping BMP to the device. You can automate this with a simple shell script called before `mcconfig`.
+</Tip>
+
+---
+
+## mcbundle — package for distribution
+
+`mcbundle` packages a built application for distribution, bundling firmware and resources into a single distributable archive. Use it when preparing a release image for manufacturing or OTA update delivery.
+
+```bash
+mcbundle -o release/ -p esp32 manifest.json
+```
+
+| Flag | Description |
+|---|---|
+| `-o <dir>` | Output directory for the bundle |
+| `-p <platform>` | Target platform (same values as `mcconfig`) |
+
+<Tip>
+Run `mcbundle` after a clean release build (without `-d`) to ensure the distributed image does not include debug metadata.
+</Tip>
+
+---
+
+## xsbug — source-level debugger
+
+`xsbug` is the graphical source-level debugger for XS. It connects to a device running a debug build (`-d` flag) over USB or a network socket and gives you:
+
+- **Breakpoints** — set and clear breakpoints in any JavaScript source file
+- **Step controls** — step over, step into, step out
+- **Call stack** — inspect the full call stack at any breakpoint
+- **Variables** — inspect and modify local and global variables
+- **Console** — evaluate expressions in the paused VM
+- **Profiler** — record and visualize per-function call times as a flame graph
+
+### Connecting xsbug
+
+<Steps>
+  <Step title="Build with the debug flag">
+    ```bash
+    mcconfig -d -m -p esp32
+    ```
+    The `-d` flag compiles debug metadata into the firmware and configures it to connect to xsbug on startup.
+  </Step>
+  <Step title="Launch xsbug">
+    Open the xsbug application. It listens on a local port for incoming device connections.
+  </Step>
+  <Step title="Power or reset the device">
+    The device connects to xsbug automatically when it boots. xsbug shows the device in its connection list and breaks at the first line of your application.
+  </Step>
+</Steps>
+
+<Warning>
+Debug builds are significantly larger than release builds and run slower due to the additional metadata. Always build without `-d` for production deployments.
+</Warning>
+
+---
+
+## xst — conformance test runner
+
+`xst` runs the official ECMAScript test262 conformance suite against the XS engine. It is primarily useful for engine developers, but you can also use it to run individual JavaScript files for quick testing outside of a device context.
+
+```bash
+# Run a single file
+xst mytest.js
+
+# Run the full test262 suite
+xst -t test262 path/to/test262
+```

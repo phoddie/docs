@@ -1,0 +1,470 @@
+---
+title: "Piu UI Framework: Retained-Mode Interfaces for Devices"
+sidebarTitle: "Piu"
+description: "Build interactive user interfaces on microcontrollers using Piu, the Moddable SDK's retained-mode UI framework with a content tree and behaviors."
+---
+
+Piu is the Moddable SDK's high-level UI framework. Rather than issuing draw calls for every frame, you describe your interface as a tree of `Content` objects — Piu keeps track of what changed and redraws only the affected areas. Touch events, animations, and state changes all flow through typed `Behavior` classes attached to each node. This retained-mode model makes it straightforward to build responsive, event-driven UIs on hardware with limited resources.
+
+## Setup
+
+Import the framework and include the Piu manifest in your `manifest.json`:
+
+```javascript
+import {} from "piu/MC";
+```
+
+```json
+{
+  "include": ["$(MODDABLE)/examples/manifest_piu.json"]
+}
+```
+
+---
+
+## Content tree overview
+
+Everything on screen lives inside a tree rooted at the `application` singleton. You build the tree by creating `Content`, `Label`, `Container`, and other nodes, then adding them to their parents.
+
+```
+Application (root)
+  └── Container
+        ├── Label     "Hello"
+        └── Content   (button background)
+```
+
+When you call `application.add(content)`, Piu measures, positions, and renders the new node automatically.
+
+---
+
+## Application
+
+`Application` is the root of the content tree. Exactly one application exists at runtime, exposed as the global `application`.
+
+### Methods
+
+<ResponseField name="add(content)" type="void">
+  Add `content` as a direct child of the application.
+</ResponseField>
+
+<ResponseField name="remove(content)" type="void">
+  Remove a direct child from the application.
+</ResponseField>
+
+<ResponseField name="run(transition, ...args)" type="void">
+  Execute a `Transition` animation. Pass any additional arguments that your transition's `onStep` callback needs.
+</ResponseField>
+
+<ResponseField name="delegate(message, ...args)" type="void">
+  Dispatch a named message upward through the behavior tree starting at the application.
+</ResponseField>
+
+<ResponseField name="distribute(message, ...args)" type="void">
+  Dispatch a named message to every descendant in the content tree.
+</ResponseField>
+
+<ResponseField name="purge()" type="void">
+  Release cached assets (textures, fonts) that are no longer referenced. Call this after removing large content to reclaim RAM.
+</ResponseField>
+
+---
+
+## Content
+
+`Content` is the base class for all visual nodes. It has a position, size, skin, and an optional `Behavior`.
+
+### Layout constraints
+
+Set position and size using combinations of `left`, `right`, `top`, `bottom`, `width`, and `height`:
+
+<Tabs>
+  <Tab title="Absolute position">
+    ```javascript
+    // Place at (10, 20), size 100×40
+    { left: 10, top: 20, width: 100, height: 40 }
+    ```
+  </Tab>
+  <Tab title="Anchored to right">
+    ```javascript
+    // 10 px from the right edge, 100 px wide
+    { right: 10, top: 20, width: 100, height: 40 }
+    ```
+  </Tab>
+  <Tab title="Fill container">
+    ```javascript
+    // Stretch to fill the parent on all sides
+    { left: 0, right: 0, top: 0, bottom: 0 }
+    ```
+  </Tab>
+</Tabs>
+
+### Properties
+
+<ResponseField name="x" type="number">
+  Computed left edge in global coordinates. Read-only at layout time; assign to move the content at runtime.
+</ResponseField>
+
+<ResponseField name="y" type="number">
+  Computed top edge in global coordinates.
+</ResponseField>
+
+<ResponseField name="width" type="number">
+  Computed width in pixels.
+</ResponseField>
+
+<ResponseField name="height" type="number">
+  Computed height in pixels.
+</ResponseField>
+
+<ResponseField name="skin" type="Skin">
+  The `Skin` controlling the background fill and border of this content.
+</ResponseField>
+
+<ResponseField name="style" type="Style">
+  The `Style` controlling font, color, and alignment for text content.
+</ResponseField>
+
+<ResponseField name="state" type="number">
+  Integer state selector (0 = normal, 1 = active/pressed, etc.). Changing state triggers a redraw and switches the skin's fill color to the matching index.
+</ResponseField>
+
+<ResponseField name="variant" type="number">
+  Variant index for skins that expose multiple visual variants.
+</ResponseField>
+
+<ResponseField name="string" type="string">
+  The display string for `Label` and `Text` nodes.
+</ResponseField>
+
+<ResponseField name="visible" type="boolean">
+  Show or hide this content without removing it from the tree.
+</ResponseField>
+
+<ResponseField name="active" type="boolean">
+  Enable or disable touch event delivery to this content.
+</ResponseField>
+
+<ResponseField name="interval" type="number">
+  Period in milliseconds between `onTimeChanged` callbacks when a timer is running.
+</ResponseField>
+
+<ResponseField name="time" type="number">
+  Current timer value in milliseconds.
+</ResponseField>
+
+<ResponseField name="duration" type="number">
+  Total duration in milliseconds for a timed animation. `onFinished` fires when `time` reaches `duration`.
+</ResponseField>
+
+---
+
+## Skin
+
+A `Skin` defines the visual appearance of a `Content` — its background color, borders, and multi-state colors.
+
+```javascript
+const PlainSkin = Skin.template({
+  fill: "white"
+});
+
+const ButtonSkin = Skin.template({
+  fill: ["#336699", "#4488BB"],  // state 0 = normal, state 1 = pressed
+  stroke: "#224466",
+  borders: { left: 2, right: 2, top: 2, bottom: 2 }
+});
+```
+
+<ParamField path="fill" type="string | string[]">
+  CSS color string or an array of color strings indexed by `content.state`.
+</ParamField>
+
+<ParamField path="stroke" type="string">
+  Border color as a CSS color string.
+</ParamField>
+
+<ParamField path="borders" type="object">
+  Border widths: `{ left, right, top, bottom }` in pixels.
+</ParamField>
+
+---
+
+## Style
+
+A `Style` defines the typographic properties for text-bearing content.
+
+```javascript
+const TitleStyle = Style.template({
+  font: "bold 24px Open Sans",
+  color: "white",
+  horizontal: "center",
+  vertical: "middle"
+});
+```
+
+<ParamField path="font" type="string">
+  Font descriptor string, e.g. `"bold 20px Open Sans"`.
+</ParamField>
+
+<ParamField path="color" type="string | string[]">
+  Text color or state-indexed array of colors.
+</ParamField>
+
+<ParamField path="horizontal" type="string">
+  Horizontal text alignment: `"left"`, `"center"`, or `"right"`.
+</ParamField>
+
+<ParamField path="vertical" type="string">
+  Vertical text alignment: `"top"`, `"middle"`, or `"bottom"`.
+</ParamField>
+
+---
+
+## Label
+
+`Label` displays a single line of text. It uses its parent's `style` unless you assign one directly.
+
+```javascript
+const greeting = new Label(null, {
+  left: 0, right: 0, top: 0, height: 40,
+  style: new TitleStyle(),
+  string: "Hello, Moddable!"
+});
+application.add(greeting);
+```
+
+---
+
+## Text
+
+`Text` displays multi-line, optionally styled text with word wrapping.
+
+```javascript
+const body = new Text(null, {
+  left: 10, right: 10, top: 60,
+  style: new BodyStyle(),
+  string: "This is a longer paragraph that will wrap automatically."
+});
+application.add(body);
+```
+
+---
+
+## Container
+
+`Container` is a `Content` that holds child nodes. Use it to group and clip related elements.
+
+### Methods
+
+<ResponseField name="add(content)" type="void">
+  Append `content` as the last child.
+</ResponseField>
+
+<ResponseField name="remove(content)" type="void">
+  Remove `content` from this container.
+</ResponseField>
+
+<ResponseField name="replace(oldContent, newContent)" type="void">
+  Swap `oldContent` with `newContent` in place.
+</ResponseField>
+
+### Properties
+
+<ResponseField name="first" type="Content | null">
+  The first child node, or `null` if the container is empty.
+</ResponseField>
+
+<ResponseField name="last" type="Content | null">
+  The last child node.
+</ResponseField>
+
+<ResponseField name="count" type="number">
+  Number of direct children.
+</ResponseField>
+
+---
+
+## Port
+
+`Port` is a `Content` that gives you a direct drawing callback. Use it when you need custom graphics that don't fit into the standard skin/style model.
+
+```javascript
+const canvas = new Port(null, {
+  left: 0, top: 0, width: 120, height: 80,
+  Behavior: class extends Behavior {
+    onDraw(port) {
+      port.fillColor("navy", 0, 0, port.width, port.height);
+      port.drawString("Custom!", Style.default, "white", 10, 10, 100, 20);
+    }
+  }
+});
+application.add(canvas);
+```
+
+---
+
+## Templates
+
+Templates let you define reusable content factories that accept a data object (`$`) and return a configured content descriptor.
+
+```javascript
+const RedSkin = Skin.template({ fill: ["#CC0000", "#FF3333"] });
+const BtnStyle = Style.template({ font: "bold 18px Open Sans", color: "white", horizontal: "center" });
+
+const MyButton = Content.template($ => ({
+  width: 100, height: 44,
+  skin: new RedSkin(),
+  style: new BtnStyle(),
+  active: true,
+  string: $.label,
+  Behavior: TapBehavior
+}));
+
+// Create instances with different labels
+application.add(new MyButton({ label: "OK" }));
+application.add(new MyButton({ label: "Cancel" }));
+```
+
+<Tip>
+  Put templates in a separate module and import them. This keeps your main application file focused on layout logic rather than style definitions.
+</Tip>
+
+---
+
+## Behavior
+
+Attach a `Behavior` subclass to any `Content` to respond to lifecycle events, touch input, and timers.
+
+```javascript
+class TapBehavior extends Behavior {
+  onCreate(content, data) {
+    // Called once when the content is created.
+    // data is the object passed to the Content constructor.
+  }
+
+  onDisplayed(content) {
+    // Called when the content appears on screen.
+  }
+
+  onUndisplayed(content) {
+    // Called when the content is removed from screen.
+  }
+
+  onTouchBegan(content, id, x, y, ticks) {
+    content.state = 1; // switch to pressed appearance
+  }
+
+  onTouchMoved(content, id, x, y, ticks) {
+    // Track pointer position during drag.
+  }
+
+  onTouchEnded(content, id, x, y, ticks) {
+    content.state = 0;
+    application.delegate("onButtonTap", content);
+  }
+
+  onTouchCancelled(content, id, x, y, ticks) {
+    content.state = 0; // reset if the system cancels the touch
+  }
+
+  onTimeChanged(content) {
+    // Called every `content.interval` ms while a timer is running.
+  }
+
+  onFinished(content) {
+    // Called when `content.time` reaches `content.duration`.
+  }
+}
+```
+
+### Key callback reference
+
+| Callback | When it fires |
+|---|---|
+| `onCreate(content, data)` | Content is constructed |
+| `onDisplayed(content)` | Content added to the on-screen tree |
+| `onUndisplayed(content)` | Content removed from the on-screen tree |
+| `onTouchBegan(content, id, x, y, ticks)` | Touch/click starts on this content |
+| `onTouchMoved(content, id, x, y, ticks)` | Touch moves |
+| `onTouchEnded(content, id, x, y, ticks)` | Touch ends |
+| `onTouchCancelled(content, id, x, y, ticks)` | Touch cancelled by the system |
+| `onTimeChanged(content)` | Timer tick |
+| `onFinished(content)` | Timer duration elapsed |
+
+---
+
+## Transitions
+
+A `Transition` animates between two content states over a fixed duration. Override `onStep(fraction)` to apply your animation logic — `fraction` goes from `0.0` to `1.0` over the duration you specify.
+
+```javascript
+class FadeTransition extends Transition {
+  constructor() {
+    super(500); // 500 ms
+  }
+
+  onBegin(container, current, next) {
+    this.container = container;
+    container.add(next);
+  }
+
+  onStep(fraction) {
+    // Fade out the first child as the second fades in
+    this.container.first.opacity = 1 - fraction;
+  }
+
+  onEnd(container, current, next) {
+    container.remove(current);
+  }
+}
+
+// Run the transition
+application.run(new FadeTransition(), currentScreen, nextScreen);
+```
+
+---
+
+## Complete example — button with tap feedback
+
+```javascript
+import {} from "piu/MC";
+
+const BackgroundSkin = Skin.template({ fill: "#1A1A2E" });
+const ButtonSkin     = Skin.template({ fill: ["#E94560", "#C73652"] });
+const ButtonStyle    = Style.template({
+  font: "bold 20px Open Sans",
+  color: "white",
+  horizontal: "center",
+  vertical: "middle"
+});
+
+class ButtonBehavior extends Behavior {
+  onTouchBegan(content) {
+    content.state = 1;
+  }
+  onTouchEnded(content) {
+    content.state = 0;
+    trace("Button tapped!\n");
+  }
+}
+
+const Button = Content.template($ => ({
+  width: 120, height: 48,
+  skin: new ButtonSkin(),
+  style: new ButtonStyle(),
+  active: true,
+  string: $.label,
+  Behavior: ButtonBehavior
+}));
+
+const Screen = Container.template($ => ({
+  left: 0, right: 0, top: 0, bottom: 0,
+  skin: new BackgroundSkin(),
+  contents: [
+    new Button({ label: "Press me" }, {
+      left: 0, right: 0, top: 0, bottom: 0 // center in parent
+    })
+  ]
+}));
+
+application.add(new Screen({}));
+```

@@ -1,0 +1,146 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "Moddable SDK",
+  "projectDescription": "An open-source SDK and runtime for building JavaScript applications on resource-constrained microcontrollers, featuring the XS JavaScript engine, networking, graphics, hardware I/O, and a full suite of build tools.",
+  "theme": "palm",
+  "primaryColor": "#ef7025",
+  "lightColor": "#eec9bc",
+  "darkColor": "#4fa1ab",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "getting-started/install-macos",
+              "getting-started/install-windows",
+              "getting-started/install-linux",
+              "getting-started/first-app"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "core-concepts/manifest",
+              "core-concepts/xs-engine",
+              "core-concepts/mods",
+              "core-concepts/tools"
+            ]
+          },
+          {
+            "group": "Hardware",
+            "pages": [
+              "devices/overview",
+              "devices/esp32",
+              "devices/esp8266",
+              "devices/nrf52",
+              "devices/pico",
+              "devices/zephyr"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/networking",
+              "guides/graphics",
+              "guides/hardware-io",
+              "guides/ui-with-piu",
+              "guides/files-storage",
+              "guides/security"
+            ]
+          },
+          {
+            "group": "Debugging & Testing",
+            "pages": [
+              "debugging/xsbug",
+              "debugging/simulator",
+              "debugging/testing"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Base",
+            "pages": [
+              "api/base",
+              "api/data",
+              "api/files"
+            ]
+          },
+          {
+            "group": "Networking",
+            "pages": [
+              "api/network",
+              "api/ble",
+              "api/tls"
+            ]
+          },
+          {
+            "group": "Graphics",
+            "pages": [
+              "api/commodetto",
+              "api/poco",
+              "api/piu"
+            ]
+          },
+          {
+            "group": "Hardware",
+            "pages": [
+              "api/pins",
+              "api/io",
+              "api/audio"
+            ]
+          },
+          {
+            "group": "Security",
+            "pages": [
+              "api/crypt"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "XS JavaScript engine with >99% ES2025 conformance",
+    "Build and deploy JavaScript apps to microcontrollers with mcconfig",
+    "Networking: HTTP/HTTPS, WebSockets, MQTT, BLE, Wi-Fi, TLS",
+    "Commodetto bitmap graphics library and Poco scanline renderer",
+    "Piu object-based UI framework with animations and touch support",
+    "Hardware I/O: Digital GPIO, Analog, PWM, I2C, SPI, Servo, Audio",
+    "ECMA-419 (TC53) standard embedded JavaScript I/O APIs",
+    "Mods: secure, portable user-installed JavaScript extensions",
+    "xsbug: full source-level JavaScript debugger with memory profiling",
+    "Desktop simulator for macOS, Linux, and Windows",
+    "TypeScript support with .d.ts typings",
+    "Support for ESP32, ESP8266, nRF52, Raspberry Pi Pico, Zephyr, and more"
+  ],
+  "publicApiSurface": [
+    "mcconfig — build, deploy, and run Moddable apps",
+    "mcrun — build and install Mods",
+    "xsbug — source-level JavaScript debugger",
+    "manifest.json — project build configuration",
+    "Timer, Time, UUID, Worker, Instrumentation (base modules)",
+    "Net, HTTP, WebSocket, MQTT, DNS, SNTP, WiFi (network module)",
+    "BLE Peripheral and Central APIs",
+    "SecureSocket / TLS certificate management",
+    "Commodetto bitmap classes and pixel format converters",
+    "Poco renderer: JS and C drawing APIs",
+    "Piu UI framework: Content, Container, Application, Style, Transition, Behavior",
+    "Digital, Analog, PWM, I2C, SMBus, Servo (pins module)",
+    "AudioOut (pins/audioout)",
+    "Flash, File, Preference, Resource, ZIP (files module)",
+    "Base64, Hex encode/decode (data module)",
+    "Digest, Cipher, HMAC, Random, Certificate (crypt module)",
+    "ECMA-419 IO classes: Digital, Analog, PWM, I2C, SPI, Serial, SMBus, Pulse Count, Wake",
+    "Mods API: install, update, remove user JavaScript extensions",
+    "XS Preload: freeze modules into ROM",
+    "XS in C: JS/C bridge API (xsGet, xsSet, xsCall, xsNewObject, etc.)"
+  ]
+}

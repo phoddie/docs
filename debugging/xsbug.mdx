@@ -1,0 +1,150 @@
+---
+title: "xsbug: Source-Level JavaScript Debugger for Moddable SDK"
+sidebarTitle: "Debugger"
+description: "Learn how to use xsbug, the source-level JavaScript debugger built into the Moddable SDK, to set breakpoints, inspect variables, and profile your app."
+---
+
+xsbug is the source-level JavaScript debugger that ships with the Moddable SDK. It connects directly to the XS runtime over TCP/IP (Wi-Fi) or USB serial, giving you full visibility into your running application — whether it's executing on real hardware or in the desktop simulator.
+
+## Launch xsbug
+
+Open xsbug on your development machine before (or while) your app is running. The debugger waits for an incoming connection from the XS runtime.
+
+<Tabs>
+  <Tab title="macOS">
+    ```bash
+    open $MODDABLE/build/bin/mac/release/xsbug.app
+    ```
+  </Tab>
+  <Tab title="Windows">
+    Navigate to `%MODDABLE%\build\bin\win\release` in Explorer and double-click `xsbug.exe`, or run it from a terminal:
+    ```bat
+    %MODDABLE%\build\bin\win\release\xsbug.exe
+    ```
+  </Tab>
+  <Tab title="Linux">
+    ```bash
+    xsbug
+    ```
+    `xsbug` is placed on your `PATH` when you run `make install` during SDK setup.
+  </Tab>
+</Tabs>
+
+## Connect your app to xsbug
+
+Build and deploy your app with the `-d` flag to enable the debug connection. Without this flag, xsbug cannot attach.
+
+```bash
+mcconfig -d -m -p esp32
+```
+
+When the app starts on the device or simulator, it automatically reaches out to xsbug. The debugger window populates with your source files, the call stack, and the instrument panel.
+
+<Note>
+  Your device and development machine must be on the same Wi-Fi network for a TCP connection, or connected with a USB cable for a serial connection. xsbug uses TCP port **5002**.
+</Note>
+
+## Set and manage breakpoints
+
+Click in the **gutter** (the narrow column to the left of line numbers) in any source file to set a breakpoint on that line. Click again to clear it. A filled circle marks an active breakpoint.
+
+To temporarily disable every breakpoint without deleting them, click the **breakpoint icon** in the toolbar. This is useful when you want to let the app run freely for a moment, then re-enable breakpoints.
+
+### The `debugger` statement
+
+Place `debugger;` anywhere in your code to trigger an unconditional breakpoint at that exact line — no gutter click required:
+
+```javascript
+function setup() {
+  const config = readConfig();
+  debugger; // execution pauses here so you can inspect config
+  applyConfig(config);
+}
+```
+
+This is especially handy for catching problems in startup code that runs before you can interact with the UI.
+
+## Step through code
+
+Once execution is paused at a breakpoint, use the stepping controls to move through your code:
+
+| Action | Keyboard shortcut |
+|---|---|
+| Continue (run to next breakpoint) | `F5` |
+| Step Over (execute current line, stay in function) | `F10` |
+| Step Into (enter the called function) | `F11` |
+| Step Out (run until current function returns) | `Shift+F11` |
+
+## Inspect state
+
+### Call stack
+
+The **Call Stack** panel shows the full JavaScript call chain at the point where execution is paused. Click any frame to jump to that location in the source and see the variables for that scope.
+
+### Variables
+
+The **Variables** panel displays:
+- **Local variables** in the current function scope
+- **Closure variables** captured from outer scopes
+- **`this`** — the current execution context
+
+Expand object and array values inline to drill into nested properties without writing extra `trace()` calls.
+
+### Modules
+
+The **Modules** panel lists every JavaScript module that has been loaded by the XS runtime. Select a module to browse its source, and set breakpoints in files you didn't open manually.
+
+## Log output with `trace()`
+
+Use the built-in `trace()` function to write text to the xsbug **Console** panel. This is the Moddable equivalent of `console.log()`:
+
+```javascript
+trace(`Temperature: ${sensor.read()}\n`);
+trace(JSON.stringify(data) + "\n");
+```
+
+<Warning>
+  Always end your `trace()` strings with `\n`. xsbug buffers output line-by-line, so omitting the newline will delay or suppress the message in the console.
+</Warning>
+
+You can call `trace()` anywhere — inside event handlers, timers, or module initializers — and the output appears in real time as the app runs.
+
+## Memory instrumentation
+
+The **Instrument** panel on the right side of xsbug updates in real time while your app runs. Use it to catch memory leaks, excessive GC pressure, and rendering bottlenecks.
+
+<Accordion title="Instrument panel columns">
+  | Column | What it shows |
+  |---|---|
+  | **Chunk heap** | Used and free bytes in the chunk (string/ArrayBuffer) heap |
+  | **Slot heap** | Used and free slots in the value heap |
+  | **Stack depth** | Current JS call stack depth |
+  | **Keys** | Number of interned property and module names |
+  | **Garbage collections** | Running count of GC cycles |
+  | **Pixels** | Display update pixels per second |
+  | **Frames** | Animation frames per second |
+  | **Network bytes in/out** | Real-time bytes received and sent |
+  | **Piu content nodes** | Count of live UI nodes in the Piu scene graph |
+</Accordion>
+
+Watch **Chunk heap** and **Slot heap** over time. If used memory climbs without returning to a baseline, you likely have an object that is not being released.
+
+## Profile CPU usage
+
+The built-in profiler records how much CPU time each function consumes so you can identify hot spots.
+
+<Steps>
+  <Step title="Start recording">
+    Click the **Record** button (circle icon) in the xsbug toolbar. The app continues running normally while profiling data is collected.
+  </Step>
+  <Step title="Stop recording">
+    Click **Stop** to end the session. xsbug processes the recorded samples.
+  </Step>
+  <Step title="Analyze the results">
+    The profiler displays a **call tree** showing time spent in each function and its callees. Focus on functions with the highest self-time first.
+  </Step>
+</Steps>
+
+<Tip>
+  Profile on the actual target device rather than the simulator for accurate timing. Microcontroller clock speeds and memory access patterns differ significantly from a desktop CPU.
+</Tip>

@@ -1,0 +1,171 @@
+---
+title: "XS JavaScript Engine: Architecture, ROM Model, and C API"
+sidebarTitle: "XS Engine"
+description: "Explore the XS JavaScript engine powering the Moddable SDK — ROM preloading, C interop, compartments, and ES2025 conformance on microcontrollers."
+---
+
+XS is the JavaScript engine at the heart of the Moddable SDK. Written entirely in C with no C++, it runs on microcontrollers with as little as 45 KB of RAM, 1 MB of flash, and an 80 MHz CPU — while achieving greater than 99% conformance with the ES2025 (ECMA-262) specification.
+
+## Design philosophy
+
+XS is built around a key insight: on a microcontroller, RAM is the scarcest resource. Rather than loading and compiling JavaScript at runtime the way a browser does, XS shifts as much work as possible to build time. The compiler and linker prepare modules into a ROM image; each running application gets a tiny VM in RAM that references the frozen ROM content rather than copying it.
+
+This ROM model is what makes it practical to run real JavaScript on hardware that costs less than a cup of coffee.
+
+## ES2025 conformance
+
+XS targets the full ECMA-262 (ES2025) specification and is tested against the official [test262](https://github.com/tc39/test262) conformance suite using the `xst` tool. You can use modern JavaScript features — destructuring, async/await, generators, classes, Proxy, WeakRef, optional chaining, and more — exactly as you would on Node.js or a browser.
+
+<Note>
+XS does **not** support ECMA-402 (the Internationalization API) and does not support multiple realms per VM instance. These are deliberate omissions to keep the engine small.
+</Note>
+
+## Preloading modules into ROM
+
+Preloading is the most impactful optimization XS offers for constrained hardware. When you list a module in the `preload` array of your `manifest.json`, the XS linker (`xsl`) compiles it to bytecode and freezes the resulting objects directly into the firmware's ROM image.
+
+At runtime, your application's VM reads those objects straight from flash — no parsing, no allocation, no copying into RAM. The benefits are significant:
+
+- **Lower RAM usage** — frozen objects live in ROM and are never duplicated in the heap
+- **Faster startup** — the module is already initialized when your app begins
+- **Smaller heap pressure** — less garbage collection work during execution
+
+```json manifest.json
+{
+  "preload": ["main", "ui/screen", "net/wifi"]
+}
+```
+
+<Warning>
+Only modules with no side-effectful top-level code are safe to preload. A preloaded module's top-level code runs at build time on your development machine, not on the device. Avoid accessing hardware peripherals or device-specific globals at the module's top level.
+</Warning>
+
+## Stripping unused built-ins
+
+Built-in JavaScript objects that your application never uses still occupy flash space by default. The `strip` key in `manifest.json` removes them from the build:
+
+```json manifest.json
+{
+  "strip": ["RegExp", "Date", "Math"]
+}
+```
+
+The XS linker removes the stripped objects from the ROM image, recovering flash space for your own code and data.
+
+## XS in C: the bridge API
+
+Because XS is written in C, integrating JavaScript with native C code is straightforward. The XS in C API lets you call JavaScript from C, call C from JavaScript, and pass values between the two worlds.
+
+### Exposing a C function to JavaScript
+
+Annotate a C function with the XS calling convention and register it as a JavaScript method:
+
+```c
+void xs_led_set(xsMachine *the) {
+    xsBooleanValue on = xsToBoolean(xsArg(0));
+    gpio_set_level(LED_PIN, on ? 1 : 0);
+}
+```
+
+### Common API functions
+
+| Function | Purpose |
+|---|---|
+| `xsGet(object, id)` | Get a property by ID |
+| `xsSet(object, id, value)` | Set a property |
+| `xsCall(object, id, ...)` | Call a method |
+| `xsNewObject()` | Create a new plain object |
+| `xsNewArray(length)` | Create a new array |
+| `xsDefine(object, id, value, attrs)` | Define a property with attributes |
+| `xsVar(index)` | Access a local variable slot |
+| `xsArg(index)` | Access a function argument by position |
+| `xsThis` | The `this` value in the current call |
+
+### Calling JavaScript from C
+
+```c
+xsBeginHost(the);
+{
+    xsVars(1);
+    xsVar(0) = xsCall1(xsGlobal, xsID("parseInt"), xsString("42"));
+    int result = xsToInteger(xsVar(0)); // result == 42
+}
+xsEndHost(the);
+```
+
+## Compartments and sandboxing
+
+XS implements Hardened JavaScript (Secure ECMAScript / SES) Compartments, which allow you to run untrusted code in an isolated sandbox. Compartments are the mechanism that makes [Mods](/core-concepts/mods) safe to install on production devices.
+
+```javascript
+import Compartment from "compartment";
+
+const c = new Compartment({
+  globals: {
+    trace: (msg) => console.log(msg),
+  }
+});
+
+c.evaluate(`import "mymod"`);
+```
+
+Each Compartment gets its own global scope. You explicitly choose which APIs to expose, so untrusted code cannot reach your hardware peripherals or system state unless you grant access.
+
+## ECMAScript modules
+
+XS uses standard ECMAScript modules (`import` / `export`) throughout. There is no CommonJS `require`. Every module you write uses the same syntax you'd use in a modern browser or Node.js ESM context:
+
+```javascript
+import Timer from "timer";
+import { say } from "./speech";
+
+export function greet(name) {
+  Timer.delay(100);
+  say(`Hello, ${name}`);
+}
+```
+
+## TypeScript support
+
+The Moddable SDK ships full `.d.ts` type declaration files in the `typings/` directory. Add the declarations to your `tsconfig.json` to get autocomplete and type checking for all Moddable built-in modules in your editor.
+
+```json tsconfig.json
+{
+  "compilerOptions": {
+    "typeRoots": ["$(MODDABLE)/typings"]
+  }
+}
+```
+
+## Built-in profiler
+
+XS includes a built-in profiler that integrates with the [xsbug debugger](/debugging/xsbug). To profile your application:
+
+<Steps>
+  <Step title="Build in debug mode">
+    Pass `-d` to `mcconfig` so the debug build connects to xsbug.
+    ```bash
+    mcconfig -d -m -p esp32
+    ```
+  </Step>
+  <Step title="Open xsbug and connect">
+    Launch xsbug and connect your device. The profiler panel appears in the toolbar.
+  </Step>
+  <Step title="Record and inspect">
+    Start a recording session in xsbug. The profiler captures per-function call times and flame-graph data, helping you identify hot paths in your JavaScript code.
+  </Step>
+</Steps>
+
+## Conformance testing with xst
+
+The `xst` tool runs the official test262 suite against XS so you can verify conformance yourself:
+
+```bash
+xst -t test262 path/to/test262
+```
+
+Use `xst` to run individual test files during engine development or when debugging unexpected language behavior:
+
+```bash
+xst mytest.js
+```

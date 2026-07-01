@@ -1,0 +1,153 @@
+---
+title: "Testing Moddable Apps with xst, assert, and test262"
+sidebarTitle: "Testing"
+description: "Write and run unit tests for your Moddable modules using the Test class, a custom assert runner, or the official ECMAScript test262 conformance suite."
+---
+
+The Moddable SDK gives you multiple layers of testing to cover both your application code and the XS engine itself. You can write lightweight unit tests that run on the simulator or on-device, use the structured `Test` class for consistent output, and run the full ECMAScript test262 conformance suite to validate the JS engine. Start in the simulator for fast iteration, then validate on target hardware before shipping.
+
+## Write unit tests for your modules
+
+The simplest approach is a standalone test runner script that imports your module and exercises it with an `assert` helper. Add the runner to your manifest and run it with `mcconfig`.
+
+### Build an assert helper
+
+```javascript
+// test/test-mymodule.js
+import MyModule from "mymodule";
+
+function assert(condition, message) {
+  if (!condition) {
+    trace(`FAIL: ${message}\n`);
+    return;
+  }
+  trace(`PASS: ${message}\n`);
+}
+
+assert(MyModule.add(1, 2) === 3, "add(1, 2) should equal 3");
+assert(MyModule.greet("World") === "Hello, World!", "greet test");
+```
+
+`trace()` writes each result to the xsbug Console in real time. Scroll the console to review failures after the run completes.
+
+### Use the `Test` class
+
+The Moddable SDK's `testmc` package provides a structured `Test` class with named assertion methods that match the test262 API:
+
+```javascript
+import {Test} from "testmc";
+
+Test.create({
+  name: "Math operations",
+  test(assert) {
+    assert.sameValue(1 + 1, 2);
+    assert.sameValue("hello".length, 5);
+  }
+});
+```
+
+<Note>
+  `assert.sameValue(actual, expected)` uses the SameValue algorithm (equivalent to `Object.is`), which correctly handles edge cases like `NaN === NaN` and `+0 !== -0` that the `===` operator gets wrong.
+</Note>
+
+## Configure the test manifest
+
+Create a dedicated `manifest.json` for your tests so that test files are never included in a production build:
+
+```json
+{
+  "include": ["$(MODDABLE)/examples/manifest_base.json"],
+  "modules": {
+    "*": "./test/test-mymodule",
+    "mymodule": "./src/mymodule"
+  }
+}
+```
+
+Point `mcconfig` at this manifest with the `-f` flag, or keep it in a `test/` subdirectory and run it separately from your main app manifest.
+
+## Run tests in the simulator and on device
+
+<Steps>
+  <Step title="Iterate fast in the simulator">
+    Run your test manifest on the simulator for a tight edit-run-check loop:
+    ```bash
+    # macOS
+    mcconfig -d -m -p mac
+
+    # Windows
+    mcconfig -d -m -p win
+
+    # Linux
+    mcconfig -d -m -p lin
+    ```
+    xsbug's Console panel shows `PASS` / `FAIL` lines as the tests execute.
+  </Step>
+  <Step title="Validate on target hardware">
+    Once all simulator tests pass, flash the same test manifest to your device:
+    ```bash
+    mcconfig -d -m -p esp32/moddable_two
+    ```
+    This catches timing differences, memory pressure, and peripheral interactions that the simulator cannot reproduce.
+  </Step>
+</Steps>
+
+<Tip>
+  Keep simulator-only and hardware-only tests in separate manifests. Use `include` to share common test helpers between them. This prevents hardware-dependent tests from blocking your fast simulator workflow.
+</Tip>
+
+## Run the test262 conformance suite with `xst`
+
+`xst` is a command-line tool that runs the official ECMAScript test262 test suite directly against the XS engine on your development machine. Use it to verify that the engine correctly implements the language features your application relies on, or to check a custom XS build for regressions.
+
+### Prerequisites
+
+Clone the test262 repository separately — it is not included in the Moddable SDK:
+
+```bash
+git clone https://github.com/tc39/test262.git
+```
+
+### Run test262
+
+<Tabs>
+  <Tab title="macOS">
+    ```bash
+    cd $MODDABLE/xs/makefiles/mac
+    xst -h                              # show all options
+    xst /path/to/test262/               # run the full suite
+    xst /path/to/test262/language/expressions/  # run a subtree
+    ```
+  </Tab>
+  <Tab title="Linux">
+    ```bash
+    cd $MODDABLE/xs/makefiles/lin
+    xst -h
+    xst /path/to/test262/
+    xst /path/to/test262/language/expressions/
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```bat
+    cd %MODDABLE%\xs\makefiles\win
+    xst -h
+    xst C:\path\to\test262\
+    xst C:\path\to\test262\language\expressions\
+    ```
+  </Tab>
+</Tabs>
+
+Running the full suite takes several minutes. Use a subtree path to target only the features you care about for faster feedback.
+
+<Warning>
+  `xst` tests the XS engine on your desktop host, not on a microcontroller. A test262 pass on the host does not guarantee identical behavior on a constrained device where stack depth, integer size, or available memory may differ.
+</Warning>
+
+## Choosing a testing strategy
+
+| Goal | Recommended approach |
+|---|---|
+| Test application module logic | Custom `assert` runner or `Test` class on simulator |
+| Test hardware-dependent code | `Test` class deployed to target device |
+| Verify XS language conformance | `xst` + test262 |
+| Catch regressions before release | Run all of the above, simulator first, then on hardware |

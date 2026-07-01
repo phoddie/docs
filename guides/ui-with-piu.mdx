@@ -1,0 +1,282 @@
+---
+title: "Building Touch UIs with Piu on Moddable SDK Devices"
+sidebarTitle: "UI with Piu"
+description: "Build interactive, touch-driven interfaces on embedded displays using Piu, the Moddable SDK's UI framework with skins, behaviors, and transitions."
+---
+
+Piu is Moddable's object-based UI framework for building graphical, interactive applications on embedded displays. It handles layout, touch input, animation, and screen transitions — giving you a structured way to build complex UIs without manually managing pixel coordinates or event dispatching.
+
+## Prerequisites
+
+Include the Piu manifest in your project:
+
+```json
+{
+  "include": [
+    "$(MODDABLE)/examples/manifest_piu.json"
+  ]
+}
+```
+
+## Core Concepts
+
+Before writing code, understand the key building blocks:
+
+| Class | Role |
+|---|---|
+| `Application` | Root container — one per app |
+| `Container` | Groups and clips child content |
+| `Content` | Base visual element (position, skin, touch) |
+| `Label` | Displays a single line of text |
+| `Text` | Displays multi-line, styled text |
+| `Port` | Custom drawing surface (calls into Poco) |
+| `Image` | Displays an image resource |
+| `Style` | Font, size, colour, alignment for text |
+| `Skin` | Fill colour, border, or texture for a `Content` |
+| `Behavior` | Event-handling logic attached to a `Content` |
+| `Transition` | Animated swap between two screens |
+
+## Your First Piu Application
+
+A minimal app creates an `Application` with a white background and a centred label:
+
+```javascript
+import {} from "piu/MC";
+
+const WhiteSkin = Skin.template({ fill: "white" });
+const BlackStyle = Style.template({ font: "20px Open Sans", color: "black" });
+
+const HelloApplication = Application.template($ => ({
+  skin: new WhiteSkin(),
+  contents: [
+    Label(null, {
+      left: 0, right: 0, top: 0, bottom: 0,
+      style: new BlackStyle(),
+      string: "Hello, World!"
+    })
+  ]
+}));
+
+export default function () {
+  new HelloApplication(null, { displayListLength: 2048, touchCount: 1 });
+}
+```
+
+<Note>
+  `displayListLength` sets the size (in bytes) of the internal render list. Increase this value if you see rendering glitches in complex layouts. `touchCount` declares the number of simultaneous touch points your display supports.
+</Note>
+
+## Layout System
+
+Piu uses a **constraint-based layout** model. You pin content edges to its parent or siblings using `left`, `right`, `top`, `bottom`, `width`, and `height`:
+
+<CodeGroup>
+  ```javascript Full-screen fill
+  Label(null, {
+    left: 0, right: 0, top: 0, bottom: 0,
+    string: "Fills the screen"
+  })
+  ```
+
+  ```javascript Fixed size, centred
+  Label(null, {
+    width: 120, height: 40,  // fixed dimensions
+    // omitting left/right/top/bottom centres automatically
+    string: "Centred"
+  })
+  ```
+
+  ```javascript Pinned to bottom-right
+  Content(null, {
+    right: 8, bottom: 8,
+    width: 48, height: 48,
+    skin: new IconSkin()
+  })
+  ```
+</CodeGroup>
+
+## Skins and Styles
+
+**Skins** define the visual appearance of a `Content` — background colour, border, or a texture bitmap. **Styles** define typography for text-bearing content like `Label`.
+
+```javascript
+// Solid colour skin
+const RedSkin = Skin.template({ fill: "red" });
+
+// Skin with border
+const BorderedSkin = Skin.template({
+  fill: "white",
+  stroke: "black",
+  borders: { left: 2, right: 2, top: 2, bottom: 2 }
+});
+
+// Text style
+const TitleStyle = Style.template({
+  font: "bold 24px Open Sans",
+  color: "black",
+  horizontal: "center"
+});
+```
+
+<Tip>
+  Define skins and styles as module-level constants using `Skin.template` and `Style.template`. This ensures a single object is shared across all instances, rather than allocating a new object per content node.
+</Tip>
+
+## Adding Interactivity with Behaviors
+
+Attach a `Behavior` subclass to any `Content` to handle touch and application events:
+
+```javascript
+const NormalSkin = Skin.template({ fill: "#4A90D9" });
+const PressedSkin = Skin.template({ fill: "#2C5F8A" });
+
+class ButtonBehavior extends Behavior {
+  onTouchBegan(content) {
+    content.skin = new PressedSkin(); // highlight on press
+  }
+  onTouchEnded(content) {
+    content.skin = new NormalSkin();  // restore on release
+    application.delegate("onButtonTap"); // notify the app
+  }
+}
+
+const ButtonContent = Content.template($ => ({
+  width: 80, height: 40,
+  skin: new NormalSkin(),
+  active: true,               // must be true to receive touch events
+  Behavior: ButtonBehavior
+}));
+```
+
+<Warning>
+  Set `active: true` on any `Content` that should receive touch events. Without it, touch events pass through to the parent even if a `Behavior` is attached.
+</Warning>
+
+### Common Behavior event handlers
+
+| Method | When it fires |
+|---|---|
+| `onCreate(content, data)` | Content is instantiated |
+| `onDisplaying(content)` | Content appears on screen |
+| `onTouchBegan(content, id, x, y)` | Touch starts |
+| `onTouchMoved(content, id, x, y)` | Finger moves |
+| `onTouchEnded(content, id, x, y)` | Touch ends |
+| `onTouchCancelled(content, id, x, y)` | Touch cancelled (e.g. scroll interrupts tap) |
+| `onTimeChanged(content)` | Content's animation clock ticks |
+
+## Containers and Screens
+
+Use `Container` to group related content and implement screen-level navigation:
+
+```javascript
+const HomeScreen = Container.template($ => ({
+  left: 0, right: 0, top: 0, bottom: 0,
+  skin: new WhiteSkin(),
+  contents: [
+    Label(null, {
+      top: 20, left: 0, right: 0,
+      style: new TitleStyle(),
+      string: "Home"
+    }),
+    ButtonContent(null, {
+      bottom: 20
+    })
+  ]
+}));
+```
+
+## Animated Transitions
+
+Replace the current screen with an animated transition by subclassing `Transition`:
+
+```javascript
+class SlideTransition extends Transition {
+  constructor() {
+    super(250); // 250 ms duration
+  }
+  onBegin(container, current, next) {
+    container.add(next);
+    this.slideWidth = container.width;
+  }
+  onStep(fraction) {
+    fraction = Math.quadEaseOut(fraction); // ease out
+    current.x = -this.slideWidth * fraction;
+    next.x = this.slideWidth - this.slideWidth * fraction;
+  }
+  onEnd(container, current, next) {
+    container.remove(current);
+  }
+}
+
+// Trigger the transition
+application.run(new SlideTransition(), current, new HomeScreen(null));
+```
+
+<Steps>
+  <Step title="Define the transition class">
+    Subclass `Transition` and pass the duration in milliseconds to `super()`.
+  </Step>
+  <Step title="Prepare in onBegin">
+    Add the incoming screen to the container and cache any values you need in `onStep`.
+  </Step>
+  <Step title="Animate in onStep">
+    `fraction` goes from 0.0 to 1.0. Apply an easing function (`Math.quadEaseOut`, `Math.cubicEaseIn`, etc.) for a natural feel.
+  </Step>
+  <Step title="Clean up in onEnd">
+    Remove the outgoing screen from the container to free memory.
+  </Step>
+</Steps>
+
+## Custom Drawing with Port
+
+When you need pixel-level control (charts, gauges, waveforms), use `Port` to call Poco drawing commands directly inside a Piu layout:
+
+```javascript
+const ChartPort = Port.template($ => ({
+  left: 0, right: 0, height: 80,
+  Behavior: class extends Behavior {
+    onDraw(port, x, y, width, height) {
+      port.fillColor(port.makeColor(240, 240, 240), x, y, width, height);
+      port.drawString("Custom", style, port.makeColor(0, 0, 0), x + 4, y + 4);
+    }
+  }
+}));
+```
+
+## Localization
+
+Piu supports runtime language switching via a JSON-based localization table:
+
+```javascript
+import LocalizationTable from "localization";
+
+// Assumes en.json and ja.json are bundled as resources
+// en.json: { "Hello": "Hello", "Goodbye": "Goodbye" }
+// ja.json: { "Hello": "こんにちは", "Goodbye": "さようなら" }
+
+const table = new LocalizationTable("ja");
+trace(table.get("Hello") + "\n");    // こんにちは
+trace(table.get("Goodbye") + "\n");  // さようなら
+```
+
+<Tip>
+  Store the active `LocalizationTable` instance globally and call `table.get(key)` whenever you set a `Label`'s `string` property. When the user changes language, recreate the table and update all visible labels.
+</Tip>
+
+## Application-Wide Events
+
+Dispatch named events to the entire application with `application.delegate`:
+
+```javascript
+// Inside a Behavior
+application.delegate("onVolumeChanged", 75);
+
+// Handle it anywhere in the tree
+class AppBehavior extends Behavior {
+  onVolumeChanged(application, volume) {
+    trace(`Volume changed to ${volume}\n`);
+  }
+}
+```
+
+This pattern decouples child components from their parents — a button does not need a reference to the screen that contains it.

@@ -1,0 +1,383 @@
+---
+title: "Moddable SDK Base Modules: Timer, Time, UUID, Worker"
+sidebarTitle: "Base"
+description: "Core runtime utilities for the Moddable SDK: scheduling timers, reading system time, generating UUIDs, and running background workers."
+---
+
+The base modules give you the fundamental building blocks every embedded JavaScript application needs — precise timing, system clock access, unique identifier generation, background task execution, and debug tracing. Import each module individually; only the code you use is linked into your firmware image.
+
+## Timer
+
+Schedule callbacks to run once or repeatedly. The `Timer` module is the primary tool for non-blocking delays and periodic tasks on the microcontroller.
+
+```javascript
+import Timer from "timer";
+```
+
+### Timer.set()
+
+Schedules a callback to fire after an initial delay, with an optional repeat interval.
+
+<ParamField path="callback" type="function" required>
+  The function to invoke when the timer fires. Receives the timer ID as its first argument.
+</ParamField>
+
+<ParamField path="delay" type="number" required>
+  Milliseconds to wait before the first invocation.
+</ParamField>
+
+<ParamField path="repeat" type="number">
+  If provided, milliseconds between subsequent invocations after the first. Omit for a one-shot timer.
+</ParamField>
+
+<ResponseField name="returns" type="number">
+  A timer ID you can pass to `Timer.clear()` or `Timer.schedule()`.
+</ResponseField>
+
+```javascript
+import Timer from "timer";
+
+// One-shot: fires once after 1 second
+const id = Timer.set(() => trace("fired!\n"), 1000);
+
+// Repeating: fires after 200 ms, then every 500 ms
+const rid = Timer.set(() => trace("tick\n"), 200, 500);
+
+// Cancel the repeating timer after 5 seconds
+Timer.set(() => Timer.clear(rid), 5000);
+```
+
+### Timer.repeat()
+
+Schedules a callback to fire immediately on the next turn of the event loop, then every `interval` milliseconds. Equivalent to `Timer.set(callback, 0, interval)`.
+
+<ParamField path="callback" type="function" required>
+  The function to invoke on each interval.
+</ParamField>
+
+<ParamField path="interval" type="number" required>
+  Milliseconds between invocations.
+</ParamField>
+
+<ResponseField name="returns" type="number">
+  A timer ID you can pass to `Timer.clear()` or `Timer.schedule()`.
+</ResponseField>
+
+```javascript
+let count = 0;
+const rid = Timer.repeat(() => {
+  trace(`count: ${++count}\n`);
+  if (count >= 10) Timer.clear(rid);
+}, 100);
+```
+
+### Timer.schedule()
+
+Reschedules an existing timer without creating a new one. Use this to adjust timing dynamically — for example, to implement exponential back-off.
+
+<ParamField path="id" type="number" required>
+  The timer ID returned by `Timer.set()` or `Timer.repeat()`.
+</ParamField>
+
+<ParamField path="delay" type="number" required>
+  New delay in milliseconds before the next invocation.
+</ParamField>
+
+<ParamField path="repeat" type="number">
+  New repeat interval in milliseconds. Omit to leave the existing repeat unchanged.
+</ParamField>
+
+```javascript
+let interval = 100;
+const id = Timer.repeat(() => {
+  trace(`interval: ${interval}\n`);
+  interval = Math.min(interval * 2, 4000);
+  Timer.schedule(id, interval, interval); // double the interval each tick
+}, interval);
+```
+
+### Timer.clear()
+
+Cancels a timer so its callback never fires again.
+
+<ParamField path="id" type="number" required>
+  The timer ID to cancel. Passing an already-cleared or invalid ID is safe and has no effect.
+</ParamField>
+
+```javascript
+const id = Timer.set(() => trace("this never runs\n"), 5000);
+Timer.clear(id);
+```
+
+### Timer.delay()
+
+Blocks execution synchronously for the specified number of milliseconds. No other JavaScript runs during this time. Use sparingly — prefer `Timer.set()` for most delays.
+
+<ParamField path="ms" type="number" required>
+  Duration to block in milliseconds.
+</ParamField>
+
+<Note>
+  `Timer.delay()` is a true busy-wait on many platforms. It blocks the event loop, prevents other timers from firing, and halts network I/O. Use it only for very short hardware-level delays (e.g., toggling a GPIO line).
+</Note>
+
+```javascript
+import Timer from "timer";
+
+// Hold a reset line low for 10 ms
+digitalOutput.write(0);
+Timer.delay(10);
+digitalOutput.write(1);
+```
+
+---
+
+## Time
+
+Read and set the system clock. The `Time` module exposes both a millisecond uptime counter and a Unix-epoch wall clock.
+
+```javascript
+import Time from "time";
+```
+
+### Properties
+
+<ResponseField name="Time.ticks" type="number">
+  Milliseconds elapsed since the device booted. Always available; does not require network time sync. Wraps at ~49 days on 32-bit platforms.
+</ResponseField>
+
+<ResponseField name="Time.seconds" type="number">
+  Current time as a Unix timestamp (seconds since 1 January 1970 UTC). Requires the device to have synchronized with an SNTP server or a call to `Time.set()`.
+</ResponseField>
+
+<ResponseField name="Time.timezone" type="number">
+  Read/write. Timezone offset from UTC in seconds (e.g. `-18000` for UTC−5). Persists across deep sleep on supported hardware.
+</ResponseField>
+
+<ResponseField name="Time.dst" type="number">
+  Read/write. Daylight saving time offset in seconds (typically `3600` when active, `0` when not).
+</ResponseField>
+
+### Time.set()
+
+Sets the current wall-clock time.
+
+<ParamField path="seconds" type="number" required>
+  Unix timestamp to set as the current time.
+</ParamField>
+
+```javascript
+import Time from "time";
+
+trace(`Uptime: ${Time.ticks} ms\n`);
+trace(`Unix time: ${Time.seconds}\n`);
+
+// Apply timezone for UTC-5 with DST active
+Time.timezone = -18000;
+Time.dst = 3600;
+
+// Manually set the clock (normally done via SNTP)
+Time.set(1700000000);
+```
+
+<Tip>
+  On most Moddable targets, pair `Time.seconds` with the SNTP module (`import SNTP from "sntp"`) to keep the clock accurate over Wi-Fi. Call `Time.set()` inside the SNTP callback once synchronization completes.
+</Tip>
+
+---
+
+## UUID
+
+Generate RFC 4122 version 4 universally unique identifiers.
+
+```javascript
+import UUID from "uuid";
+```
+
+### UUID.get()
+
+Returns a new randomly-generated UUID string each time it is called.
+
+<ResponseField name="returns" type="string">
+  A UUID formatted as `xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx`.
+</ResponseField>
+
+```javascript
+import UUID from "uuid";
+
+const deviceId = UUID.get();
+trace(`Device ID: ${deviceId}\n`);
+// e.g. "550e8400-e29b-41d4-a716-446655440000"
+
+// Generate a unique topic name per session
+const topic = `devices/${UUID.get()}/telemetry`;
+```
+
+---
+
+## Worker
+
+Run JavaScript on a separate thread. Workers let you offload CPU-intensive computation, protocol handling, or sensor polling without blocking the main application loop.
+
+```javascript
+import Worker from "worker";
+```
+
+<Note>
+  Moddable Workers are isolated: each Worker has its own XS virtual machine and memory heap. Communication happens exclusively through message passing — Workers cannot share objects with the main thread.
+</Note>
+
+### new Worker()
+
+Creates and starts a new Worker, loading the module at `specifier` as the worker's entry point.
+
+<ParamField path="specifier" type="string" required>
+  Module path (without `.js` extension) as it appears in your project manifest. The runtime loads this module in the new thread.
+</ParamField>
+
+<ResponseField name="returns" type="Worker">
+  A Worker instance with `postMessage()`, `terminate()`, and an `onmessage` handler.
+</ResponseField>
+
+### worker.postMessage()
+
+Sends a message to the worker thread. The data is serialized and deserialized, so it must be JSON-compatible.
+
+<ParamField path="data" type="any" required>
+  A JSON-serializable value. The worker receives it as `event.data` inside its `onmessage` handler.
+</ParamField>
+
+### worker.terminate()
+
+Stops the worker thread and frees its memory. Any unprocessed messages are discarded.
+
+### worker.onmessage
+
+Assign a function to this property on the main-thread Worker instance to receive messages sent back from the worker via `self.postMessage()`.
+
+<Expandable title="Worker thread API (inside the worker module)">
+  <ResponseField name="self.onmessage" type="function">
+    Assign a handler to receive messages sent from the main thread via `worker.postMessage()`. The handler receives a `MessageEvent` with a `data` property.
+  </ResponseField>
+  <ResponseField name="self.postMessage(data)" type="function">
+    Send a message back to the main thread. `data` must be JSON-serializable.
+  </ResponseField>
+  <ResponseField name="self.close()" type="function">
+    Terminate the worker from within the worker itself.
+  </ResponseField>
+</Expandable>
+
+```javascript
+// main.js
+import Worker from "worker";
+
+const worker = new Worker("sensor");
+
+worker.onmessage = function(event) {
+  trace(`Reading: ${event.data.value}\n`);
+};
+
+worker.postMessage({ command: "start", interval: 250 });
+
+// Stop the worker after 10 seconds
+Timer.set(() => worker.terminate(), 10_000);
+```
+
+```javascript
+// sensor.js  (worker module)
+let timerId;
+
+self.onmessage = function(event) {
+  const { command, interval } = event.data;
+
+  if (command === "start") {
+    let count = 0;
+    timerId = Timer.repeat(() => {
+      self.postMessage({ value: readSensor(), seq: count++ });
+    }, interval);
+  }
+
+  if (command === "stop") {
+    Timer.clear(timerId);
+    self.close();
+  }
+};
+
+function readSensor() {
+  // ... hardware read
+  return Math.random() * 100;
+}
+```
+
+---
+
+## trace()
+
+Write a string to the xsbug debugger console. `trace()` is a global function — no import needed.
+
+<ParamField path="message" type="string" required>
+  The string to print. Always end with `\n` to flush the output buffer on all platforms.
+</ParamField>
+
+<Note>
+  `trace()` output is discarded in production builds (when xsbug is not connected). Use it freely during development without worrying about shipping debug overhead.
+</Note>
+
+```javascript
+const x = 42;
+trace("Hello from the device!\n");
+trace(`Sensor value: ${x}\n`);
+trace(`Free memory: ${System.freeMemory}\n`);
+```
+
+---
+
+## Instrumentation
+
+Read internal VM metrics — memory usage, garbage collection pressure, and more. Useful for profiling and detecting memory leaks.
+
+```javascript
+import Instrumentation from "instrumentation";
+```
+
+### Instrumentation.get()
+
+<ParamField path="index" type="number" required>
+  Metric index. See the table below for available metrics.
+</ParamField>
+
+<ResponseField name="returns" type="number">
+  Current value of the requested metric.
+</ResponseField>
+
+<Accordion title="Available instrumentation indices">
+
+| Index | Metric |
+|-------|--------|
+| 1 | XS slots used |
+| 2 | XS slots available |
+| 3 | XS stack used |
+| 4 | Chunk heap used (bytes) |
+| 5 | Chunk heap available (bytes) |
+| 6 | Keys used |
+| 7 | Garbage collections run |
+| 8 | Modules loaded |
+| 9 | Network bytes read |
+| 10 | Network bytes written |
+| 11 | Network sockets open |
+| 12 | Timers active |
+| 13 | Files open |
+| 14 | Poco display list used (bytes) |
+| 15 | Piu frames drawn |
+
+</Accordion>
+
+```javascript
+import Instrumentation from "instrumentation";
+
+const slotsUsed   = Instrumentation.get(1);
+const chunkUsed   = Instrumentation.get(4);
+const gcRuns      = Instrumentation.get(7);
+
+trace(`Slots: ${slotsUsed}, Chunk heap: ${chunkUsed} B, GC runs: ${gcRuns}\n`);
+```

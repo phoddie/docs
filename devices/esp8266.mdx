@@ -1,0 +1,119 @@
+---
+title: "Moddable SDK with ESP8266: Install Toolchain and Build"
+sidebarTitle: "ESP8266"
+description: "Install the ESP8266 toolchain, configure your environment, and build Moddable SDK apps for Moddable One, Moddable Three, NodeMCU, and more."
+---
+
+The ESP8266 is a compact Wi-Fi microcontroller that has powered countless IoT projects. The Moddable SDK supports it through dedicated board configurations for the Moddable One, Moddable Three, and the popular NodeMCU development board. Because the ESP8266 has fewer resources than the ESP32 — roughly 45 KB of free RAM at runtime — you need to plan your module usage carefully, but the chip remains an excellent choice for simple connected devices where cost and board size matter.
+
+## Supported boards
+
+| Board | Platform identifier | Notes |
+|---|---|---|
+| Generic ESP8266 | `esp8266` | Any ESP8266 module |
+| Moddable One | `esp8266/moddable_one` | 1.8" TFT display, Wi-Fi |
+| Moddable Three | `esp8266/moddable_three` | ePaper display, Wi-Fi |
+| NodeMCU | `esp8266/nodemcu` | Common breadboard-friendly dev board |
+
+## Prerequisites
+
+<Steps>
+  <Step title="Install the Moddable SDK tools">
+    Complete the [Getting Started guide](/getting-started) first. This installs `mcconfig` and the host-side Moddable toolchain.
+  </Step>
+  <Step title="Install the Xtensa lx106 toolchain">
+    The ESP8266 uses the Xtensa lx106 core. Install the `xtensa-lx106-elf-gcc` cross-compiler for your host platform. You can obtain it through the Espressif ESP8266 RTOS SDK repository or from a pre-built toolchain package for your OS.
+  </Step>
+  <Step title="Install esptool">
+    `esptool.py` handles flashing firmware to the ESP8266:
+
+    ```bash
+    pip install esptool
+    ```
+
+    Verify the installation:
+
+    ```bash
+    esptool.py version
+    ```
+  </Step>
+  <Step title="Set environment variables">
+    Add the following to your shell profile so the build system can locate the SDK and toolchain:
+
+    ```bash
+    export ESP_BASE=~/esp8266/ESP8266_RTOS_SDK
+    export PATH=$PATH:$ESP_BASE/tools
+    ```
+
+    Replace the path with wherever you cloned or installed the SDK. Reload your profile or open a new terminal after saving.
+  </Step>
+  <Step title="Connect the board">
+    Plug your ESP8266 board in via USB. The serial port appears the same as for ESP32 boards: `/dev/cu.usbserial-*` on macOS, or `/dev/ttyUSB0` on Linux.
+  </Step>
+</Steps>
+
+## Build and flash
+
+Run `mcconfig` with the `-d`, `-m`, and `-p` flags, followed by the platform identifier for your board.
+
+```bash
+# Generic ESP8266
+mcconfig -d -m -p esp8266
+
+# Moddable One (1.8" TFT display)
+mcconfig -d -m -p esp8266/moddable_one
+
+# Moddable Three (ePaper display)
+mcconfig -d -m -p esp8266/moddable_three
+
+# NodeMCU
+mcconfig -d -m -p esp8266/nodemcu
+```
+
+After a successful build `mcconfig` automatically flashes the firmware over the USB serial port and resets the board. Open xsbug before running the command to catch output from startup.
+
+## Working within memory constraints
+
+The ESP8266 provides approximately 45 KB of free RAM at runtime. This is enough for well-structured JavaScript applications, but you need to be deliberate about what you load.
+
+<Warning>
+  Running out of heap memory on the ESP8266 causes a hard reset. Monitor your memory usage with `System.free()` during development and reduce your module footprint if you see crashes under normal operation.
+</Warning>
+
+Use these manifest options to reduce memory pressure:
+
+**`strip`** — removes unused XS bytecode from the build output, shrinking flash usage and leaving more room for runtime data.
+
+**`preload`** — compiles JavaScript modules into the read-only flash XIP region, so their bytecode never occupies precious RAM.
+
+Add them to your `manifest.json`:
+
+```json
+{
+  "modules": {
+    "*": "./src/*"
+  },
+  "preload": [
+    "main"
+  ],
+  "strip": "*"
+}
+```
+
+<Tip>
+  Prefer small, focused modules over large all-in-one libraries. On the ESP8266 every byte of RAM counts — splitting functionality across multiple preloaded modules keeps your runtime heap available for dynamic data.
+</Tip>
+
+## Choosing between ESP8266 and ESP32
+
+If your project requirements allow it, consider using an ESP32 target instead:
+
+| | ESP8266 | ESP32 |
+|---|---|---|
+| Free RAM | ~45 KB | 520 KB+ |
+| Wi-Fi | ✅ | ✅ |
+| Bluetooth | ❌ | ✅ |
+| Display support | ✅ | ✅ |
+| Cost | Very low | Low |
+
+The ESP8266 remains a great fit when you need the smallest possible board, the lowest unit cost, or when you are maintaining an existing ESP8266-based product.

@@ -1,0 +1,522 @@
+---
+title: "Moddable Network API — Wi-Fi, HTTP, WebSocket, MQTT"
+sidebarTitle: "Network"
+description: "Connect to Wi-Fi, make HTTP requests, open WebSocket connections, publish MQTT messages, and resolve DNS on Moddable-powered microcontrollers."
+---
+
+The Moddable SDK networking stack gives you access to Wi-Fi management, HTTP/HTTPS clients, WebSockets, MQTT, DNS resolution, and time synchronisation — all from JavaScript running on the microcontroller. Every module is imported individually so you pull in only what your application needs.
+
+## Manifest setup
+
+Add the network manifest to your project's `manifest.json` to include all networking modules:
+
+```json
+{
+  "include": [
+    "$(MODDABLE)/examples/manifest_net.json"
+  ]
+}
+```
+
+## Net — network information
+
+The `Net` module exposes read-only properties about the current network interface.
+
+```javascript
+import Net from "net";
+```
+
+Call `Net.get(property)` to read a network property by name:
+
+<ParamField path="property" type="string" required>
+  The property to read. One of `"IP"`, `"MAC"`, `"SSID"`, `"BSSID"`, or `"RSSI"`.
+</ParamField>
+
+<ResponseField name="Net.get('IP')" type="string">
+  The device's current IPv4 address, e.g. `"192.168.1.42"`.
+</ResponseField>
+
+<ResponseField name="Net.get('MAC')" type="string">
+  The device's MAC address in colon-separated hex, e.g. `"AA:BB:CC:DD:EE:FF"`.
+</ResponseField>
+
+<ResponseField name="Net.get('SSID')" type="string">
+  The SSID of the currently associated Wi-Fi network.
+</ResponseField>
+
+<ResponseField name="Net.get('BSSID')" type="string">
+  The BSSID (MAC address) of the connected access point.
+</ResponseField>
+
+<ResponseField name="Net.get('RSSI')" type="number">
+  Received signal strength in dBm. More negative values indicate a weaker signal.
+</ResponseField>
+
+```javascript
+import Net from "net";
+
+trace(`IP:   ${Net.get("IP")}\n`);
+trace(`MAC:  ${Net.get("MAC")}\n`);
+trace(`SSID: ${Net.get("SSID")}\n`);
+trace(`RSSI: ${Net.get("RSSI")} dBm\n`);
+```
+
+---
+
+## WiFi — connection management
+
+The `WiFi` module lets you scan for networks, connect, and disconnect.
+
+```javascript
+import WiFi from "wifi";
+```
+
+### Connect to a network
+
+```javascript
+WiFi.connect(options, callback)
+```
+
+<ParamField body="options" type="object" required>
+  Connection parameters.
+  <Expandable title="options properties">
+    <ParamField body="ssid" type="string" required>
+      The SSID of the network to join.
+    </ParamField>
+    <ParamField body="password" type="string">
+      The WPA/WPA2 passphrase. Omit for open networks.
+    </ParamField>
+    <ParamField body="bssid" type="string">
+      Target a specific access point by its BSSID when multiple share the same SSID.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="callback" type="function" required>
+  Called at each stage of the connection. Receives `(message, code)`.
+
+  | `message` | Meaning |
+  |-----------|---------|
+  | `"connect"` | Associated with the access point |
+  | `"gotIP"` | DHCP lease obtained — safe to use the network |
+  | `"disconnect"` | Connection lost or failed |
+</ParamField>
+
+```javascript
+import WiFi from "wifi";
+import Net from "net";
+
+WiFi.connect({ ssid: "MyNetwork", password: "s3cr3t" }, (message) => {
+  switch (message) {
+    case "connect":
+      trace("Associated with AP\n");
+      break;
+    case "gotIP":
+      trace(`IP address: ${Net.get("IP")}\n`);
+      break;
+    case "disconnect":
+      trace("Disconnected\n");
+      break;
+  }
+});
+```
+
+### Scan for networks
+
+```javascript
+WiFi.scan(options, callback)
+```
+
+<ParamField body="options" type="object">
+  Pass `{}` for default scan behaviour. No required fields.
+</ParamField>
+
+<ParamField body="callback" type="function" required>
+  Called once per discovered network, then called with `undefined` when the scan finishes.
+</ParamField>
+
+Each result object passed to the callback has:
+
+<ResponseField name="ssid" type="string">Network name.</ResponseField>
+<ResponseField name="rssi" type="number">Signal strength in dBm.</ResponseField>
+<ResponseField name="auth" type="number">Authentication type (0 = open).</ResponseField>
+<ResponseField name="bssid" type="string">Access point MAC address.</ResponseField>
+
+```javascript
+WiFi.scan({}, (result) => {
+  if (!result) {
+    trace("Scan complete\n");
+    return;
+  }
+  trace(`${result.ssid} (${result.rssi} dBm)\n`);
+});
+```
+
+### Disconnect
+
+```javascript
+WiFi.disconnect();
+```
+
+Call this to release the current Wi-Fi association. The `"disconnect"` callback fires after the stack unwinds.
+
+### Status and mode
+
+```javascript
+trace(WiFi.status + "\n"); // numeric status code
+WiFi.mode = WiFi.station;  // client mode (default)
+WiFi.mode = WiFi.accessPoint; // soft-AP mode
+```
+
+<Note>
+  Wait for the `"gotIP"` message before making any network requests. The `"connect"` message means association succeeded, but the device does not yet have an IP address.
+</Note>
+
+---
+
+## HTTPRequest — HTTP and HTTPS client
+
+`HTTPRequest` handles a single HTTP transaction. Create a new instance for each request.
+
+```javascript
+import { HTTPRequest } from "http";
+```
+
+```javascript
+new HTTPRequest(options, callback)
+```
+
+<ParamField body="options" type="object" required>
+  <Expandable title="options properties">
+    <ParamField body="host" type="string" required>
+      Hostname to connect to (e.g. `"api.example.com"`).
+    </ParamField>
+    <ParamField body="port" type="number">
+      TCP port. Defaults to `80` for HTTP and `443` for HTTPS.
+    </ParamField>
+    <ParamField body="path" type="string">
+      Request path including query string, e.g. `"/v1/data?limit=10"`. Defaults to `"/"`.
+    </ParamField>
+    <ParamField body="method" type="string">
+      HTTP method. Defaults to `"GET"`.
+    </ParamField>
+    <ParamField body="headers" type="array">
+      Flat alternating name/value array of request headers:
+      `["Content-Type", "application/json", "Authorization", "Bearer token"]`.
+    </ParamField>
+    <ParamField body="body" type="string | ArrayBuffer | boolean">
+      Request body. Pass a string or `ArrayBuffer` to send it all at once. Pass `true` to stream the body in chunks via `HTTPRequest.requestFragment` callbacks.
+    </ParamField>
+    <ParamField body="response" type="constructor">
+      How to accumulate the response body. Use `String` for text, `ArrayBuffer` for binary data, or omit for streaming (receive `HTTPRequest.responseFragment` callbacks instead).
+    </ParamField>
+    <ParamField body="Socket" type="class">
+      Socket class to use. Import `SecureSocket` and pass it here for HTTPS.
+    </ParamField>
+    <ParamField body="secure" type="object">
+      TLS options when using `SecureSocket`. See the [TLS reference](/api/tls).
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+### Callback messages
+
+<ResponseField name="HTTPRequest.requestFragment" type="number">
+  Fired when `body: true` and the stack is ready for the next chunk. Return an `ArrayBuffer` or string chunk; return `undefined` when done.
+</ResponseField>
+
+<ResponseField name="HTTPRequest.responseStatus" type="number">
+  `value` is the HTTP status code (e.g. `200`).
+</ResponseField>
+
+<ResponseField name="HTTPRequest.responseHeaders" type="number">
+  `value` is a flat name/value array of response headers.
+</ResponseField>
+
+<ResponseField name="HTTPRequest.responseFragment" type="number">
+  Streaming mode only. `value` is an `ArrayBuffer` chunk.
+</ResponseField>
+
+<ResponseField name="HTTPRequest.responseComplete" type="number">
+  Request finished. `value` is the full response body when `response` type was specified.
+</ResponseField>
+
+<ResponseField name="Negative number" type="number">
+  An error occurred. The absolute value is an error code.
+</ResponseField>
+
+### Examples
+
+<Tabs>
+  <Tab title="Simple GET">
+    ```javascript
+    import { HTTPRequest } from "http";
+
+    new HTTPRequest({
+      host: "httpbin.org",
+      path: "/get",
+      response: String
+    }, (msg, value) => {
+      if (msg === HTTPRequest.responseStatus)
+        trace(`Status: ${value}\n`);
+      else if (msg === HTTPRequest.responseComplete)
+        trace(value + "\n");
+      else if (msg < 0)
+        trace(`Error: ${msg}\n`);
+    });
+    ```
+  </Tab>
+  <Tab title="POST with JSON">
+    ```javascript
+    import { HTTPRequest } from "http";
+
+    const body = JSON.stringify({ sensor: "temp", value: 22.5 });
+
+    new HTTPRequest({
+      host: "api.example.com",
+      path: "/readings",
+      method: "POST",
+      headers: ["Content-Type", "application/json"],
+      body,
+      response: String
+    }, (msg, value) => {
+      if (msg === HTTPRequest.responseComplete)
+        trace(`Response: ${value}\n`);
+    });
+    ```
+  </Tab>
+  <Tab title="Streaming response">
+    ```javascript
+    import { HTTPRequest } from "http";
+
+    new HTTPRequest({
+      host: "example.com",
+      path: "/large-file"
+      // no `response` property — enables streaming
+    }, (msg, value) => {
+      if (msg === HTTPRequest.responseFragment) {
+        // value is an ArrayBuffer chunk
+        const chunk = String.fromArrayBuffer(value);
+        trace(chunk);
+      } else if (msg === HTTPRequest.responseComplete) {
+        trace("\n--- done ---\n");
+      }
+    });
+    ```
+  </Tab>
+  <Tab title="HTTPS">
+    ```javascript
+    import { HTTPRequest } from "http";
+    import SecureSocket from "securesocket";
+    import Resource from "Resource";
+
+    new HTTPRequest({
+      host: "api.example.com",
+      path: "/secure",
+      Socket: SecureSocket,
+      port: 443,
+      secure: {
+        certificate: new Resource("ca_bundle.der"),
+        verify: true
+      },
+      response: String
+    }, (msg, value) => {
+      if (msg === HTTPRequest.responseComplete)
+        trace(value + "\n");
+    });
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## WebSocketClient — persistent bidirectional connections
+
+Use `WebSocketClient` for real-time two-way communication over WebSocket.
+
+```javascript
+import { WebSocketClient } from "websocket";
+```
+
+```javascript
+new WebSocketClient(options, callback)
+```
+
+<ParamField body="options" type="object" required>
+  <Expandable title="options properties">
+    <ParamField body="host" type="string" required>Hostname of the WebSocket server.</ParamField>
+    <ParamField body="port" type="number">Port. Defaults to `80` (`443` for WSS).</ParamField>
+    <ParamField body="path" type="string">Upgrade path. Defaults to `"/"` .</ParamField>
+    <ParamField body="protocol" type="string">WebSocket sub-protocol to request.</ParamField>
+    <ParamField body="Socket" type="class">Pass `SecureSocket` for `wss://` connections.</ParamField>
+    <ParamField body="secure" type="object">TLS options for `SecureSocket`.</ParamField>
+  </Expandable>
+</ParamField>
+
+### Methods
+
+<ResponseField name="ws.write(data)" type="method">
+  Send a message. Pass a string for text frames or an `ArrayBuffer` for binary frames.
+</ResponseField>
+
+<ResponseField name="ws.close()" type="method">
+  Initiate a clean WebSocket close handshake.
+</ResponseField>
+
+### Callback messages
+
+| Message constant | Meaning |
+|-----------------|---------|
+| `WebSocketClient.connect` | Handshake complete; ready to send and receive |
+| `WebSocketClient.receive` | `value` is the received message (string or `ArrayBuffer`) |
+| `WebSocketClient.disconnect` | Connection closed |
+
+```javascript
+import { WebSocketClient } from "websocket";
+
+const ws = new WebSocketClient({
+  host: "ws.example.com",
+  port: 8080,
+  path: "/chat"
+}, (msg, value) => {
+  switch (msg) {
+    case WebSocketClient.connect:
+      trace("Connected\n");
+      ws.write("Hello from Moddable!");
+      break;
+    case WebSocketClient.receive:
+      trace(`Received: ${value}\n`);
+      break;
+    case WebSocketClient.disconnect:
+      trace("Disconnected\n");
+      break;
+  }
+});
+```
+
+---
+
+## MQTT — publish/subscribe messaging
+
+The `MQTT` module implements an MQTT 3.1.1 client suitable for IoT telemetry and command channels.
+
+```javascript
+import MQTT from "mqtt";
+```
+
+```javascript
+new MQTT(options, callback)
+```
+
+<ParamField body="options" type="object" required>
+  <Expandable title="options properties">
+    <ParamField body="host" type="string" required>Broker hostname or IP address.</ParamField>
+    <ParamField body="port" type="number">Broker port. Defaults to `1883`.</ParamField>
+    <ParamField body="id" type="string">Client identifier. The broker requires this to be unique.</ParamField>
+    <ParamField body="user" type="string">Username for broker authentication.</ParamField>
+    <ParamField body="password" type="string">Password for broker authentication.</ParamField>
+    <ParamField body="keepalive" type="number">Keep-alive interval in seconds.</ParamField>
+    <ParamField body="clean" type="boolean">Start a clean session when `true`.</ParamField>
+    <ParamField body="will" type="object">Last-will message object `{topic, message, qos, retain}`.</ParamField>
+  </Expandable>
+</ParamField>
+
+### Methods
+
+<ResponseField name="client.publish(topic, message, qos, retain)" type="method">
+  Publish `message` (string or `ArrayBuffer`) to `topic`. `qos` is `0`, `1`, or `2`. Pass `true` for `retain` to store the message on the broker.
+</ResponseField>
+
+<ResponseField name="client.subscribe(topic, qos)" type="method">
+  Subscribe to `topic`. Wildcard `+` and `#` are supported.
+</ResponseField>
+
+<ResponseField name="client.unsubscribe(topic)" type="method">
+  Remove the subscription for `topic`.
+</ResponseField>
+
+### Callback messages
+
+| Message constant | Meaning |
+|-----------------|---------|
+| `MQTT.connected` | Broker connection established |
+| `MQTT.message` | `value` is `{topic, data}` with `data` as an `ArrayBuffer` |
+| `MQTT.closed` | Connection to broker lost or closed |
+
+```javascript
+import MQTT from "mqtt";
+
+const client = new MQTT({
+  host: "broker.hivemq.com",
+  port: 1883,
+  id: "moddable-device-01"
+}, (msg, value) => {
+  switch (msg) {
+    case MQTT.connected:
+      trace("MQTT connected\n");
+      client.subscribe("devices/+/cmd");
+      client.publish("devices/moddable-01/status", "online", 1, true);
+      break;
+    case MQTT.message: {
+      const text = String.fromArrayBuffer(value.data);
+      trace(`[${value.topic}] ${text}\n`);
+      break;
+    }
+    case MQTT.closed:
+      trace("MQTT disconnected\n");
+      break;
+  }
+});
+```
+
+<Tip>
+  Use QoS 1 for sensor telemetry where you need confirmation the broker received the message, and QoS 0 for high-frequency data where the occasional lost packet is acceptable.
+</Tip>
+
+---
+
+## DNS — hostname resolution
+
+Resolve hostnames to IP addresses without a full HTTP request.
+
+```javascript
+import DNS from "dns";
+
+DNS.resolve("example.com", DNS.A, (name, address) => {
+  trace(`${name} → ${address}\n`);
+});
+```
+
+### Supported record types
+
+| Constant | DNS record type |
+|----------|----------------|
+| `DNS.A` | IPv4 address |
+| `DNS.AAAA` | IPv6 address |
+| `DNS.PTR` | Reverse lookup |
+| `DNS.SRV` | Service locator |
+| `DNS.TXT` | Text record |
+
+---
+
+## SNTP — time synchronisation
+
+Synchronise the device clock from an NTP server. Call this once after obtaining an IP address.
+
+```javascript
+import SNTP from "sntp";
+import Time from "time";
+
+SNTP.get("pool.ntp.org", (time) => {
+  if (time) {
+    Time.set(time);
+    trace(`Clock set: ${new Date(time * 1000)}\n`);
+  } else {
+    trace("SNTP failed\n");
+  }
+});
+```
+
+<Note>
+  `SNTP.get` calls back with `undefined` on failure. Always guard against a falsy value before calling `Time.set`.
+</Note>

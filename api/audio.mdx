@@ -1,0 +1,307 @@
+---
+title: "AudioOut: Play and Mix Audio Samples on Microcontrollers"
+sidebarTitle: "Audio"
+description: "Queue and play audio samples, mix multiple streams, and control volume on Moddable devices using the AudioOut API with .maud resource files."
+---
+
+The `AudioOut` class lets you play audio on any Moddable device equipped with a speaker or amplifier. It works with pre-converted `.maud` audio resources that you bundle directly into your application's flash storage — no filesystem or SD card required. You enqueue audio data and playback commands onto numbered stream slots, then start the output. When streams are mixed together, `AudioOut` handles the per-sample blending before sending PCM data to the hardware.
+
+## Setup
+
+Add the `audioout` driver for your target platform to `manifest.json`. The exact driver name depends on your hardware (for example, ESP32 with an I2S amplifier):
+
+```json
+{
+  "include": ["$(MODDABLE)/modules/drivers/audioout/manifest.json"]
+}
+```
+
+Then import `AudioOut` in your JavaScript:
+
+```javascript
+import AudioOut from "pins/audioout";
+```
+
+### Converting audio files
+
+The Moddable SDK uses a compact `.maud` format for audio resources. Convert WAV files with the `wav2maud` command-line tool:
+
+```bash
+wav2maud -o output.maud input.wav
+```
+
+Add the resulting `.maud` file to your project's `resources` section in `manifest.json`:
+
+```json
+{
+  "resources": {
+    "*": ["./sounds/sound"]
+  }
+}
+```
+
+---
+
+## Constructor
+
+```javascript
+const audio = new AudioOut(options);
+```
+
+<ParamField path="options.sampleRate" type="number" required>
+  Playback sample rate in samples per second. Common values: `8000`, `11025`, `16000`, `22050`, `44100`. Match this to your audio resources for best quality.
+</ParamField>
+
+<ParamField path="options.bitsPerSample" type="number" required>
+  Bit depth: `8` or `16`. Most `.maud` files are 16-bit.
+</ParamField>
+
+<ParamField path="options.numChannels" type="number" required>
+  `1` for mono, `2` for stereo.
+</ParamField>
+
+<ParamField path="options.streams" type="number">
+  Number of independent audio streams that can play simultaneously. The output is a mix of all active streams. Defaults to `1`. Each additional stream consumes CPU cycles and memory during mixing.
+</ParamField>
+
+---
+
+## Methods
+
+### enqueue
+
+Queue a command or data onto a stream.
+
+```javascript
+audio.enqueue(stream, type, data, count, startSample, endSample);
+```
+
+<ParamField path="stream" type="number" required>
+  Zero-based stream index. Must be less than the `streams` value passed to the constructor.
+</ParamField>
+
+<ParamField path="type" type="number" required>
+  The kind of operation to enqueue:
+
+  | Constant | Description |
+  |---|---|
+  | `AudioOut.Samples` | Queue audio sample data for playback |
+  | `AudioOut.Flush` | Clear all pending data from the stream |
+  | `AudioOut.Callback` | Fire the `onBuffer` handler when this point in the queue is reached |
+  | `AudioOut.Volume` | Set the stream's volume at this point in the queue |
+</ParamField>
+
+<ParamField path="data" type="Resource | ArrayBuffer | number">
+  For `AudioOut.Samples`: a `Resource` or `ArrayBuffer` containing `.maud` audio data.  
+  For `AudioOut.Callback`: an integer token passed back to `onBuffer`.  
+  For `AudioOut.Volume`: a number from `0` (silence) to `1024` (full volume).  
+  Not used with `AudioOut.Flush`.
+</ParamField>
+
+<ParamField path="count" type="number">
+  Number of times to repeat the sample buffer. Omit or pass `1` to play once.
+</ParamField>
+
+<ParamField path="startSample" type="number">
+  Sample offset within the buffer at which playback begins. Defaults to `0`.
+</ParamField>
+
+<ParamField path="endSample" type="number">
+  Sample offset at which playback ends. Defaults to the end of the buffer.
+</ParamField>
+
+### start
+
+Begin (or resume) playback on all active streams.
+
+```javascript
+audio.start();
+```
+
+### stop
+
+Pause playback. The queue is preserved; call `start()` to resume.
+
+```javascript
+audio.stop();
+```
+
+### close
+
+Stop playback, flush all queues, and release hardware resources. Do not use the `AudioOut` instance after calling `close()`.
+
+```javascript
+audio.close();
+```
+
+---
+
+## Callbacks
+
+### onBuffer
+
+Called when an `AudioOut.Callback` entry is dequeued during playback.
+
+```javascript
+audio.onBuffer = (stream, value) => {
+  trace(`Stream ${stream} reached callback ${value}\n`);
+};
+```
+
+<ResponseField name="stream" type="number">
+  Zero-based index of the stream that triggered the callback.
+</ResponseField>
+
+<ResponseField name="value" type="number">
+  The integer token you passed as `data` when you enqueued `AudioOut.Callback`.
+</ResponseField>
+
+---
+
+## Examples
+
+<Tabs>
+  <Tab title="Play a sound once">
+    ```javascript
+    import AudioOut  from "pins/audioout";
+    import Resource  from "Resource";
+
+    const audio = new AudioOut({
+      sampleRate: 11025,
+      bitsPerSample: 16,
+      numChannels: 1,
+      streams: 1
+    });
+
+    audio.enqueue(0, AudioOut.Samples, new Resource("click.maud"));
+    audio.enqueue(0, AudioOut.Callback, 1);
+
+    audio.onBuffer = (stream, value) => {
+      if (value === 1) {
+        audio.stop();
+        audio.close();
+      }
+    };
+
+    audio.start();
+    ```
+  </Tab>
+  <Tab title="Loop background music">
+    ```javascript
+    import AudioOut from "pins/audioout";
+    import Resource from "Resource";
+
+    const LOOP_TOKEN = 99;
+    const music      = new Resource("background.maud");
+
+    const audio = new AudioOut({
+      sampleRate: 22050,
+      bitsPerSample: 16,
+      numChannels: 1,
+      streams: 1
+    });
+
+    function queueLoop() {
+      audio.enqueue(0, AudioOut.Flush);
+      audio.enqueue(0, AudioOut.Samples, music);
+      audio.enqueue(0, AudioOut.Callback, LOOP_TOKEN);
+    }
+
+    audio.onBuffer = (stream, value) => {
+      if (value === LOOP_TOKEN) queueLoop(); // re-queue for seamless loop
+    };
+
+    queueLoop();
+    audio.start();
+    ```
+  </Tab>
+  <Tab title="Mix two streams">
+    ```javascript
+    import AudioOut from "pins/audioout";
+    import Resource from "Resource";
+
+    const audio = new AudioOut({
+      sampleRate: 11025,
+      bitsPerSample: 16,
+      numChannels: 1,
+      streams: 2  // two simultaneous streams
+    });
+
+    // Stream 0: background tone
+    audio.enqueue(0, AudioOut.Samples, new Resource("tone.maud"), 4); // repeat 4x
+
+    // Stream 1: alert beep — starts at the same time
+    audio.enqueue(1, AudioOut.Volume, 512);  // 50% volume on stream 1
+    audio.enqueue(1, AudioOut.Samples, new Resource("beep.maud"));
+    audio.enqueue(1, AudioOut.Callback, 7);
+
+    audio.onBuffer = (stream, value) => {
+      trace(`Stream ${stream} done (token ${value})\n`);
+    };
+
+    audio.start();
+    ```
+  </Tab>
+  <Tab title="Volume control">
+    ```javascript
+    import AudioOut from "pins/audioout";
+    import Resource from "Resource";
+
+    const audio = new AudioOut({
+      sampleRate: 11025,
+      bitsPerSample: 16,
+      numChannels: 1,
+      streams: 1
+    });
+
+    // Fade from 100% down to 25% over the course of the sound
+    audio.enqueue(0, AudioOut.Volume, 1024);           // full volume
+    audio.enqueue(0, AudioOut.Samples, new Resource("voice.maud"));
+    audio.enqueue(0, AudioOut.Volume, 256);            // 25% volume
+    audio.enqueue(0, AudioOut.Samples, new Resource("voice.maud"));
+    audio.enqueue(0, AudioOut.Callback, 42);
+
+    audio.onBuffer = (stream, value) => {
+      if (value === 42) {
+        audio.stop();
+        audio.close();
+      }
+    };
+
+    audio.start();
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## AudioOut.Volume reference
+
+The volume value passed to `AudioOut.Volume` is a linear scale from `0` to `1024`:
+
+| Value | Level |
+|---|---|
+| `0` | Silent |
+| `256` | 25% |
+| `512` | 50% |
+| `768` | 75% |
+| `1024` | Full (default) |
+
+<Note>
+  Volume applies per-stream and takes effect at the exact point in the queue where you enqueue it. Queue a volume change before and after a sample to crossfade between clips without interrupting playback.
+</Note>
+
+---
+
+## Enqueue type constants
+
+| Constant | Value description |
+|---|---|
+| `AudioOut.Samples` | PCM data in `.maud` format |
+| `AudioOut.Flush` | Discard all queued items for this stream |
+| `AudioOut.Callback` | Trigger `onBuffer` with a custom integer token |
+| `AudioOut.Volume` | Set stream volume (0–1024) at queue position |
+
+<Tip>
+  Always enqueue an `AudioOut.Callback` at the end of your playback sequence so you know when to call `audio.close()`. Calling `close()` while data is still playing produces an abrupt cutoff.
+</Tip>

@@ -1,0 +1,273 @@
+---
+title: "manifest.json: Configuring Your Moddable Application"
+sidebarTitle: "Manifest"
+description: "Learn how manifest.json configures a Moddable app — declaring modules, resources, platform overrides, XS VM sizing, and ROM preloading."
+---
+
+Every Moddable application is described by a `manifest.json` file that sits at the root of your project. The build tool `mcconfig` reads this file to generate a platform-specific makefile, resolving all dependencies, modules, resources, and compiler settings before a single byte reaches your device.
+
+## Structure overview
+
+A manifest is a plain JSON object. Each top-level key controls a distinct aspect of the build. You can include other manifests to compose behavior, override settings per platform, and tune the XS virtual machine — all from one file.
+
+```json manifest.json
+{
+  "include": [
+    "$(MODDABLE)/examples/manifest_base.json",
+    "$(MODDABLE)/examples/manifest_net.json"
+  ],
+  "modules": {
+    "*": "./main"
+  },
+  "resources": {
+    "*": ["./images/logo"]
+  },
+  "config": {
+    "ssid": "",
+    "password": ""
+  },
+  "platforms": {
+    "esp32": {
+      "modules": {
+        "*": "$(MODULES)/network/wifi/*"
+      }
+    }
+  },
+  "preload": ["main"]
+}
+```
+
+## Top-level keys
+
+<Accordion title="include — compose from other manifests">
+
+The `include` array lists other manifest files whose settings are merged into your own. Moddable ships several ready-made shared manifests in `examples/`:
+
+| Manifest | Purpose |
+|---|---|
+| `manifest_base.json` | Included in every example; provides core runtime defaults |
+| `manifest_piu.json` | Piu UI framework |
+| `manifest_commodetto.json` | Commodetto 2D graphics |
+| `manifest_net.json` | Networking stack |
+| `manifest_mod.json` | Mods (user-installable extensions) support |
+
+```json
+{
+  "include": [
+    "$(MODDABLE)/examples/manifest_base.json",
+    "$(MODDABLE)/examples/manifest_piu.json"
+  ]
+}
+```
+
+Later entries in `include` take precedence over earlier ones. Your own manifest keys override everything inherited.
+
+</Accordion>
+
+<Accordion title="modules — JavaScript source files to compile">
+
+The `modules` object maps destination module paths to source file paths. The key is the module identifier used in `import` statements; the value is the source path on disk. Use `"*"` as a wildcard to include all files in a directory.
+
+```json
+{
+  "modules": {
+    "*": "./main",
+    "assets/*": "./assets/*"
+  }
+}
+```
+
+</Accordion>
+
+<Accordion title="resources — images, fonts, and audio">
+
+The `resources` object follows the same key/value pattern as `modules`, but targets binary assets — bitmaps, fonts, and audio files — that need to be bundled with your app.
+
+```json
+{
+  "resources": {
+    "*": [
+      "./images/logo",
+      "./fonts/body"
+    ]
+  }
+}
+```
+
+</Accordion>
+
+<Accordion title="config — runtime configuration">
+
+The `config` object is passed to your JavaScript code as a plain object at runtime. Use it for settings like network credentials, display driver selection, or any app-level configuration you want to keep out of source code.
+
+```json
+{
+  "config": {
+    "ssid": "",
+    "password": "",
+    "screen": "ili9341",
+    "touch": "xpt2046"
+  }
+}
+```
+
+</Accordion>
+
+<Accordion title="defines — C compile-time constants">
+
+Use `defines` to set C preprocessor constants, overriding defaults in native driver and library code without editing the source.
+
+```json
+{
+  "defines": {
+    "ili9341": {
+      "cs_pin": 5,
+      "dc_pin": 4
+    }
+  }
+}
+```
+
+</Accordion>
+
+<Accordion title="build — build-time environment variables">
+
+The `build` object defines environment variables available during the build process, such as custom paths and device subclass names.
+
+```json
+{
+  "build": {
+    "NAME": "my_app",
+    "ESP32_SUBCLASS": "esp32s3"
+  }
+}
+```
+
+</Accordion>
+
+<Accordion title="preload — freeze modules into ROM">
+
+List module paths in `preload` to have the XS linker compile and freeze them into ROM. Preloaded modules consume no RAM at startup and initialize faster, which is critical on devices with limited memory.
+
+```json
+{
+  "preload": ["main", "assets/strings"]
+}
+```
+
+See the [XS Engine](/core-concepts/xs-engine) page for a deeper explanation of how preloading works.
+
+</Accordion>
+
+<Accordion title="strip — remove unused built-ins">
+
+The `strip` array lists built-in JavaScript objects that should be removed from the build entirely, recovering flash space on constrained devices.
+
+```json
+{
+  "strip": ["RegExp", "Date"]
+}
+```
+
+<Warning>
+Stripping a built-in that your code (or any included module) depends on will cause a runtime error. Test thoroughly after adding entries to `strip`.
+</Warning>
+
+</Accordion>
+
+<Accordion title="creation — XS VM memory sizing">
+
+The `creation` object controls how the XS virtual machine allocates memory. Tuning these values lets you balance RAM usage against performance on your specific hardware.
+
+| Key | Description |
+|---|---|
+| `stackCount` | Number of stack slots |
+| `initialChunkSize` | Initial chunk heap allocation (bytes) |
+| `incrementalChunkSize` | Chunk heap growth increment (bytes) |
+| `initialHeapCount` | Initial slot heap count |
+| `incrementalHeapCount` | Slot heap growth increment |
+
+```json
+{
+  "creation": {
+    "stackCount": 256,
+    "initialChunkSize": 8192,
+    "incrementalChunkSize": 1024,
+    "initialHeapCount": 512,
+    "incrementalHeapCount": 64
+  }
+}
+```
+
+</Accordion>
+
+<Accordion title="platforms — per-platform overrides">
+
+Any top-level key can be overridden inside `platforms` for a specific target. The platform key matches the `-p` argument you pass to `mcconfig` (e.g. `esp32`, `nrf52`, `pico`).
+
+```json
+{
+  "modules": {
+    "*": "./main"
+  },
+  "platforms": {
+    "esp32": {
+      "modules": {
+        "*": "$(MODULES)/network/wifi/*"
+      },
+      "defines": {
+        "wifi": { "country": "US" }
+      }
+    },
+    "nrf52": {
+      "modules": {
+        "*": "$(MODULES)/network/ble/*"
+      }
+    }
+  }
+}
+```
+
+<Tip>
+Use platform subkeys like `"esp32/moddable_two"` to target a specific board variant while still inheriting from the parent platform block.
+</Tip>
+
+</Accordion>
+
+<Accordion title="data — raw binary files">
+
+The `data` object includes raw binary files in your build output without any transformation.
+
+```json
+{
+  "data": {
+    "*": "./certs/ca-bundle"
+  }
+}
+```
+
+</Accordion>
+
+## Putting it together
+
+<Steps>
+  <Step title="Start from a shared base">
+    Include `manifest_base.json` so you inherit the core runtime. Add other shared manifests for any subsystem you use (networking, UI, mods).
+  </Step>
+  <Step title="Declare your modules">
+    Point `modules` at your entry point and any local helpers. Use `"*"` wildcards for directories.
+  </Step>
+  <Step title="Add resources">
+    List images, fonts, and audio under `resources` so `mcconfig` packs them into the firmware image.
+  </Step>
+  <Step title="Preload what you can">
+    Move stable modules into `preload` to freeze them in ROM and reduce RAM pressure at runtime.
+  </Step>
+  <Step title="Override per platform">
+    Use `platforms` to swap in hardware-specific drivers or defines without duplicating the rest of your manifest.
+  </Step>
+</Steps>
+
+<Note>
+The `$(MODDABLE)` and `$(MODULES)` tokens in path strings are environment variable references that `mcconfig` resolves at build time. Set `MODDABLE` in your shell environment to the root of your Moddable SDK installation.
+</Note>

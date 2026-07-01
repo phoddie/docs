@@ -1,0 +1,258 @@
+---
+title: "Security on Moddable: TLS, Cryptography, and Secure Comms"
+sidebarTitle: "Security"
+description: "Secure your Moddable device with TLS for HTTPS and WSS, and apply SHA, HMAC, AES, and random-number primitives from the Moddable SDK crypto modules."
+---
+
+Microcontrollers that connect to the internet are exposed to the same threats as any networked device. The Moddable SDK provides a full cryptographic library — TLS for transport security, digest and HMAC for message integrity, AES for symmetric encryption, and a hardware-backed random-number generator — so you can apply the right protection at every layer.
+
+## Cryptographic Modules
+
+| Module | Purpose |
+|---|---|
+| `SecureSocket` | TLS transport for HTTP / WebSocket |
+| `Digest` (from `"crypt"`) | SHA-1, SHA-256, SHA-512, MD5 hash functions |
+| `HMAC` (from `"crypt"`) | Hash-based message authentication |
+| `Crypt.BlockCipher` | AES block encryption |
+| `Random` (from `"crypt"`) | Cryptographically secure random bytes |
+
+## TLS — Securing HTTP Requests
+
+### HTTPS GET
+
+Swap the default `Socket` for `SecureSocket` and provide a CA certificate bundle to verify the server's identity:
+
+```javascript
+import { HTTPRequest } from "http";
+import SecureSocket from "securesocket";
+import Resource from "Resource";
+
+new HTTPRequest({
+  host: "api.example.com",
+  path: "/secure/data",
+  response: String,
+  Socket: SecureSocket,
+  secure: {
+    certificate: new Resource("ca_bundle.der"),
+    verify: true   // reject invalid/untrusted certificates
+  }
+}, (msg, value) => {
+  if (msg === HTTPRequest.responseComplete) {
+    trace(value + "\n");
+  }
+  if (msg < 0) {
+    trace(`TLS error: ${value}\n`);
+  }
+});
+```
+
+### Adding the CA certificate to your manifest
+
+Bundle the certificate as a resource so it is available to `new Resource(...)` at runtime:
+
+```json
+{
+  "resources": {
+    "*": [
+      "$(MODDABLE)/modules/crypt/data/ca_bundle"
+    ]
+  }
+}
+```
+
+<Note>
+  The Moddable SDK ships a pre-compiled CA bundle (`ca_bundle.der`) that covers most public certificate authorities. For internal APIs or self-signed certificates, add your own `.der`-encoded CA certificate instead.
+</Note>
+
+<Steps>
+  <Step title="Export your CA certificate in DER format">
+    ```bash
+    openssl x509 -in ca.pem -outform DER -out ca.der
+    ```
+  </Step>
+  <Step title="Add it to your project resources">
+    Copy `ca.der` into your project (e.g. `resources/ca.der`) and reference it in the manifest:
+
+    ```json
+    {
+      "resources": {
+        "*": ["./resources/ca"]
+      }
+    }
+    ```
+  </Step>
+  <Step title="Reference it in SecureSocket options">
+    ```javascript
+    secure: {
+      certificate: new Resource("ca.der"),
+      verify: true
+    }
+    ```
+  </Step>
+</Steps>
+
+### Secure WebSocket (WSS)
+
+The same `Socket: SecureSocket` pattern applies to WebSocket connections:
+
+```javascript
+import { WebSocketClient } from "websocket";
+import SecureSocket from "securesocket";
+import Resource from "Resource";
+
+const ws = new WebSocketClient({
+  host: "secure.example.com",
+  path: "/ws",
+  Socket: SecureSocket,
+  secure: {
+    certificate: new Resource("ca_bundle.der"),
+    verify: true
+  }
+}, (msg, value) => {
+  if (msg === WebSocketClient.connect) {
+    ws.write("hello over TLS");
+  }
+  if (msg === WebSocketClient.receive) {
+    trace(`Received: ${value}\n`);
+  }
+});
+```
+
+<Warning>
+  Setting `verify: false` disables certificate validation entirely. This makes TLS useless against man-in-the-middle attacks. Only use `verify: false` during local development — never in production firmware.
+</Warning>
+
+## Hashing — SHA-256
+
+Compute a cryptographic digest to verify data integrity:
+
+```javascript
+import { Digest } from "crypt";
+
+const digest = new Digest("SHA256");
+digest.write(ArrayBuffer.fromString("Hello, World!"));
+const hash = digest.close(); // returns ArrayBuffer
+
+// Print as comma-separated bytes
+trace(new Uint8Array(hash).join(",") + "\n");
+```
+
+### Supported algorithms
+
+| Algorithm | Constant | Output size |
+|---|---|---|
+| SHA-1 | `"SHA1"` | 20 bytes |
+| SHA-256 | `"SHA256"` | 32 bytes |
+| SHA-512 | `"SHA512"` | 64 bytes |
+| MD5 | `"MD5"` | 16 bytes |
+
+<Tip>
+  Call `digest.write` multiple times to hash a large payload in chunks without loading it all into memory at once. Call `digest.close()` only once — it finalises the hash and the object becomes unusable.
+</Tip>
+
+### Hashing binary data
+
+```javascript
+import { Digest } from "crypt";
+
+const digest = new Digest("SHA256");
+digest.write(sensorReadingBuffer); // ArrayBuffer from a sensor
+const hash = digest.close();
+```
+
+## HMAC — Message Authentication
+
+HMAC combines a secret key with a hash function to produce an authentication tag. Use it to sign messages so the receiver can verify they haven't been tampered with:
+
+```javascript
+import { HMAC, Digest } from "crypt";
+
+const key = ArrayBuffer.fromString("my-secret-key");
+const message = ArrayBuffer.fromString("sensor=temp&value=22.5");
+
+const hmac = new HMAC(new Digest("SHA256"), key);
+hmac.write(message);
+const mac = hmac.close(); // ArrayBuffer — the authentication tag
+
+trace("MAC: " + new Uint8Array(mac).join(",") + "\n");
+```
+
+<Note>
+  The key passed to `HMAC` must be an `ArrayBuffer`. Use `ArrayBuffer.fromString` to convert a string key, or supply raw key bytes from a secure source.
+</Note>
+
+## AES — Symmetric Encryption
+
+Encrypt a 16-byte block with AES-128:
+
+```javascript
+import Crypt from "crypt";
+
+const key = new Uint8Array(16); // 128-bit key — fill with real key bytes
+key.fill(0xAB);                 // example: all 0xAB
+
+const cipher = new Crypt.BlockCipher("AES", key.buffer);
+
+const plaintext = new Uint8Array(16);
+plaintext.fill(0x00); // 16 bytes of plaintext
+
+const ciphertext = cipher.encrypt(plaintext.buffer); // returns ArrayBuffer
+trace("Encrypted: " + new Uint8Array(ciphertext).join(",") + "\n");
+
+// Decrypt
+const decrypted = cipher.decrypt(ciphertext);
+```
+
+<Warning>
+  Raw AES block cipher mode (ECB) is deterministic — the same plaintext always produces the same ciphertext. For real-world use, apply a mode of operation such as CBC or CTR and generate a fresh IV for each message.
+</Warning>
+
+### Key sizes
+
+| Key length | Mode |
+|---|---|
+| 16 bytes | AES-128 |
+| 24 bytes | AES-192 |
+| 32 bytes | AES-256 |
+
+## Random Number Generation
+
+Generate cryptographically secure random bytes for keys, nonces, and session tokens:
+
+```javascript
+import { Random } from "crypt";
+
+const random = new Random();
+
+const keyBytes = random.get(16);  // 16 random bytes → 128-bit key (ArrayBuffer)
+const nonce = random.get(8);      // 8-byte nonce
+
+trace("Key: " + new Uint8Array(keyBytes).join(",") + "\n");
+```
+
+<Tip>
+  Always use `Random` (not `Math.random()`) when generating cryptographic material. `Math.random()` is not cryptographically secure and must never be used for keys, IVs, or tokens.
+</Tip>
+
+## Security Checklist
+
+<Accordion title="Pre-deployment security checklist">
+  Before shipping firmware, verify each item:
+
+  - [ ] All external API calls use HTTPS (`Socket: SecureSocket, verify: true`)
+  - [ ] CA certificate bundled and `verify: true` — not `false`
+  - [ ] No secrets (API keys, passwords) hard-coded in source; use `Preference` or provisioned at manufacture
+  - [ ] MQTT broker requires authentication (`username` / `password` in MQTT options)
+  - [ ] WebSocket connections to external hosts use WSS
+  - [ ] Random keys and nonces generated with `Random`, not `Math.random()`
+  - [ ] AES encryption uses CBC or CTR mode with a fresh IV per message
+  - [ ] Firmware update process validates signature before flashing
+</Accordion>
+
+<Accordion title="Handling certificate expiry">
+  CA certificates and server certificates expire. Plan for certificate rotation:
+
+  1. Bundle the CA bundle as a resource that can be updated via OTA.
+  2. On TLS handshake failure (negative `msg` code), log the error and alert the user or initiate a certificate refresh flow.
+  3. Test against an expired certificate in your CI pipeline by manipulating the device clock.
+</Accordion>

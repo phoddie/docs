@@ -1,0 +1,419 @@
+---
+title: "ECMA-419 IO: Standards-Based Embedded Hardware I/O API"
+sidebarTitle: "IO"
+description: "Use the TC53 ECMA-419 standard I/O API in the Moddable SDK for portable, hardware-independent access to digital, serial, SPI, and analog peripherals."
+---
+
+The Moddable SDK implements [ECMA-419](https://419.ecma-international.org/), the TC53 standard for JavaScript hardware I/O. Unlike the [Pins API](/api/pins), which is Moddable-specific, ECMA-419 defines a portable interface that is designed to work the same way across any compliant JavaScript runtime. If you're building code you want to share across platforms, or if you prefer a standards-based approach, reach for the `embedded:io/` modules.
+
+Every ECMA-419 class follows the same contract:
+- Instantiate with an options object that describes the peripheral.
+- Exchange data with `read()` and `write()`.
+- Provide `onReadable`, `onWritable`, and `onError` callbacks for event-driven operation.
+- Call `close()` to release the hardware resource.
+
+---
+
+## Digital
+
+`Digital` in ECMA-419 provides the same GPIO control as the Pins `Digital` class but with a standardized interface.
+
+### Import
+
+```javascript
+import Digital from "embedded:io/digital";
+```
+
+### Constructor
+
+```javascript
+const pin = new Digital(options);
+```
+
+<ParamField path="options.pin" type="number" required>
+  GPIO pin number.
+</ParamField>
+
+<ParamField path="options.mode" type="number" required>
+  Pin direction and resistor configuration.
+
+  | Constant | Description |
+  |---|---|
+  | `Digital.Input` | Floating input |
+  | `Digital.InputPullUp` | Input with pull-up |
+  | `Digital.InputPullDown` | Input with pull-down |
+  | `Digital.Output` | Push-pull output |
+  | `Digital.OutputOpenDrain` | Open-drain output |
+</ParamField>
+
+<ParamField path="options.onReadable" type="function">
+  Called when the pin value changes (interrupt-driven). Call `this.read()` inside to get the new value.
+</ParamField>
+
+### Methods
+
+<ResponseField name="read()" type="number">
+  Return `1` (high) or `0` (low).
+</ResponseField>
+
+<ResponseField name="write(value)" type="void">
+  Set the output state: `1` for high, `0` for low.
+</ResponseField>
+
+<ResponseField name="close()" type="void">
+  Release the GPIO resource.
+</ResponseField>
+
+### Example — output and input
+
+```javascript
+import Digital from "embedded:io/digital";
+
+// Output
+const led = new Digital({ pin: 2, mode: Digital.Output });
+led.write(1); // LED on
+led.write(0); // LED off
+led.close();
+
+// Interrupt-driven input
+const button = new Digital({
+  pin: 0,
+  mode: Digital.InputPullUp,
+  onReadable() {
+    trace(`Button: ${this.read()}\n`);
+  }
+});
+```
+
+---
+
+## Analog
+
+`Analog` reads voltages on ADC-capable pins.
+
+### Import
+
+```javascript
+import Analog from "embedded:io/analog";
+```
+
+### Constructor
+
+```javascript
+const adc = new Analog({ pin: 34 });
+```
+
+<ParamField path="options.pin" type="number" required>
+  ADC-capable GPIO pin number.
+</ParamField>
+
+### Methods
+
+<ResponseField name="read()" type="number">
+  Return the sampled voltage as a value from `0` to `(2^resolution) - 1`. For a 10-bit ADC, the range is 0–1023.
+</ResponseField>
+
+<ResponseField name="close()" type="void">
+  Release the ADC resource.
+</ResponseField>
+
+### Example
+
+```javascript
+import Analog from "embedded:io/analog";
+
+const adc  = new Analog({ pin: 34 });
+const raw  = adc.read();
+const pct  = ((raw / 1023) * 100).toFixed(1);
+trace(`Analog: ${raw} (${pct}%)\n`);
+adc.close();
+```
+
+---
+
+## Serial (UART)
+
+`Serial` implements a full-duplex UART. Use `onReadable` for non-blocking receive and `write()` to send data.
+
+### Import
+
+```javascript
+import Serial from "embedded:io/serial";
+```
+
+### Constructor
+
+```javascript
+const uart = new Serial(options);
+```
+
+<ParamField path="options.baud" type="number" required>
+  Baud rate in bits per second (e.g., `9600`, `115200`).
+</ParamField>
+
+<ParamField path="options.port" type="number">
+  UART peripheral index when the device has multiple UARTs. Defaults to `0`.
+</ParamField>
+
+<ParamField path="options.onReadable" type="function">
+  Called when receive data is available. The first argument is the number of bytes available. Call `this.read(count)` to retrieve them.
+</ParamField>
+
+<ParamField path="options.onWritable" type="function">
+  Called when the transmit buffer has space. The first argument is the number of bytes that can be written.
+</ParamField>
+
+<ParamField path="options.onError" type="function">
+  Called when a framing, parity, or overflow error occurs.
+</ParamField>
+
+### Methods
+
+<ResponseField name="read(count)" type="ArrayBuffer">
+  Read up to `count` bytes from the receive buffer. Returns an `ArrayBuffer`.
+</ResponseField>
+
+<ResponseField name="write(buffer)" type="void">
+  Write an `ArrayBuffer` or typed array to the transmit buffer.
+</ResponseField>
+
+<ResponseField name="close()" type="void">
+  Close the UART port.
+</ResponseField>
+
+### Example — echo received bytes
+
+```javascript
+import Serial from "embedded:io/serial";
+
+const uart = new Serial({
+  baud: 115200,
+  onReadable(count) {
+    const data = this.read(count);
+    // Echo everything back
+    this.write(data);
+    trace(String.fromArrayBuffer(data));
+  },
+  onError() {
+    trace("UART error\n");
+  }
+});
+
+// Send a greeting
+uart.write(ArrayBuffer.fromString("Hello from Moddable!\n"));
+```
+
+<Note>
+  `ArrayBuffer.fromString()` and `String.fromArrayBuffer()` are Moddable SDK extensions to the standard JavaScript runtime. They convert between strings and raw byte buffers without needing `TextEncoder`/`TextDecoder`.
+</Note>
+
+---
+
+## SPI
+
+`SPI` implements the Serial Peripheral Interface bus. Use `transfer()` for simultaneous full-duplex read/write operations.
+
+### Import
+
+```javascript
+import SPI from "embedded:io/spi";
+```
+
+### Constructor
+
+```javascript
+const spi = new SPI(options);
+```
+
+<ParamField path="options.hz" type="number" required>
+  SPI clock frequency in hertz.
+</ParamField>
+
+<ParamField path="options.mode" type="number">
+  SPI clock polarity and phase (CPOL/CPHA), 0–3. Defaults to `0`.
+</ParamField>
+
+<ParamField path="options.select" type="number">
+  Chip-select (CS/SS) pin number. Drive it manually if omitted.
+</ParamField>
+
+<ParamField path="options.active" type="number">
+  Logic level that asserts the chip-select pin: `0` (active-low, default) or `1` (active-high).
+</ParamField>
+
+### Methods
+
+<ResponseField name="read(count)" type="ArrayBuffer">
+  Read `count` bytes, driving MOSI low (0x00) during the transfer.
+</ResponseField>
+
+<ResponseField name="write(buffer)" type="void">
+  Write the contents of `buffer` (an `ArrayBuffer` or typed array). Received bytes are discarded.
+</ResponseField>
+
+<ResponseField name="transfer(txBuffer, rxBuffer)" type="void">
+  Simultaneously write from `txBuffer` and read into `rxBuffer`. Both buffers must be the same size.
+</ResponseField>
+
+<ResponseField name="close()" type="void">
+  Release the SPI bus.
+</ResponseField>
+
+### Example — read and write over SPI
+
+```javascript
+import SPI from "embedded:io/spi";
+
+const spi = new SPI({
+  hz: 1_000_000,
+  mode: 0,
+  select: 5
+});
+
+// Write a command byte
+spi.write(Uint8Array.of(0x9F).buffer); // Read ID command
+
+// Full-duplex transfer
+const tx = new Uint8Array([0x01, 0x02, 0x03]);
+const rx = new Uint8Array(3);
+spi.transfer(tx.buffer, rx.buffer);
+trace(`Received: ${[...rx].join(", ")}\n`);
+
+spi.close();
+```
+
+---
+
+## I2C
+
+`I2C` in ECMA-419 communicates with I2C peripherals using explicit `read()` and `write()` calls.
+
+### Import
+
+```javascript
+import I2C from "embedded:io/i2c";
+```
+
+### Constructor
+
+```javascript
+const i2c = new I2C({ sda: 21, scl: 22, address: 0x48 });
+```
+
+<ParamField path="options.sda" type="number" required>
+  SDA (data) pin number.
+</ParamField>
+
+<ParamField path="options.scl" type="number" required>
+  SCL (clock) pin number.
+</ParamField>
+
+<ParamField path="options.address" type="number" required>
+  7-bit target device address.
+</ParamField>
+
+<ParamField path="options.hz" type="number">
+  Bus clock frequency. Defaults to `100000`.
+</ParamField>
+
+### Methods
+
+<ResponseField name="read(count)" type="ArrayBuffer">
+  Read `count` bytes from the device. Returns an `ArrayBuffer`.
+</ResponseField>
+
+<ResponseField name="write(buffer)" type="void">
+  Write an `ArrayBuffer` or typed array to the device.
+</ResponseField>
+
+<ResponseField name="close()" type="void">
+  Release the I2C bus.
+</ResponseField>
+
+---
+
+## PulseCount
+
+`PulseCount` counts pulses or tracks quadrature encoder position. It is well-suited for rotary encoders, flow meters, and odometers.
+
+### Import
+
+```javascript
+import PulseCount from "embedded:io/pulsecount";
+```
+
+### Constructor
+
+```javascript
+const encoder = new PulseCount(options);
+```
+
+<ParamField path="options.signal" type="number" required>
+  Pin for the primary pulse signal (encoder channel A).
+</ParamField>
+
+<ParamField path="options.control" type="number">
+  Pin for the secondary signal used for direction detection (encoder channel B). Omit for simple pulse counting.
+</ParamField>
+
+<ParamField path="options.onReadable" type="function">
+  Called whenever the count changes. Call `this.read()` to get the new count.
+</ParamField>
+
+### Methods
+
+<ResponseField name="read()" type="number">
+  Return the current pulse count as a signed integer. For a quadrature encoder, the sign indicates direction.
+</ResponseField>
+
+<ResponseField name="write(value)" type="void">
+  Reset the count to `value`. Use `this.write(0)` to zero the counter.
+</ResponseField>
+
+<ResponseField name="close()" type="void">
+  Release the pulse-count resource.
+</ResponseField>
+
+### Example — rotary encoder with reset button
+
+```javascript
+import PulseCount from "embedded:io/pulsecount";
+import Digital    from "embedded:io/digital";
+
+const encoder = new PulseCount({
+  signal: 18,
+  control: 19,
+  onReadable() {
+    trace(`Encoder: ${this.read()}\n`);
+  }
+});
+
+// Reset encoder count when a button is pressed
+const resetBtn = new Digital({
+  pin: 0,
+  mode: Digital.InputPullUp,
+  onReadable() {
+    if (this.read() === 0) encoder.write(0);
+  }
+});
+```
+
+---
+
+## Choosing between Pins and ECMA-419
+
+<Accordion title="When to use the Pins API (pins/)">
+  - You are targeting Moddable hardware exclusively.
+  - You want concise, familiar Moddable conventions.
+  - You need the `SMBus` or `Servo` helpers, which have no ECMA-419 equivalent yet.
+</Accordion>
+
+<Accordion title="When to use ECMA-419 (embedded:io/)">
+  - You are writing code you want to run on any ECMA-419-compliant runtime.
+  - You are contributing to a library intended for the broader TC53 ecosystem.
+  - You prefer a strict, standards-defined API surface.
+</Accordion>
+
+<Tip>
+  Both APIs coexist in the same project. You can, for example, use ECMA-419 `Digital` for portable sensor code while using `pins/servo` for a Servo that will only ever run on your specific board.
+</Tip>

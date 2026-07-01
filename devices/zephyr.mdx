@@ -1,0 +1,106 @@
+---
+title: "Moddable SDK on Zephyr RTOS: Setup and Build Guide"
+sidebarTitle: "Zephyr"
+description: "Install the Zephyr RTOS toolchain and west build tool, then run Moddable SDK JavaScript apps on any Zephyr-supported microcontroller board."
+---
+
+The Zephyr port of the Moddable SDK lets you run JavaScript applications on any board supported by the Zephyr RTOS. Zephyr covers a vast range of hardware — from Nordic, STMicroelectronics, NXP, and Espressif chips to custom silicon — so the Moddable SDK can reach hardware families that do not have a dedicated native port. The Zephyr port supports Ethernet networking, BLE in the central role, file storage, and ESP32 targets running under the Zephyr kernel.
+
+## Supported targets
+
+Any board with a Zephyr BSP can, in principle, run the Moddable SDK. The following targets are known to work and are actively maintained:
+
+| Target | Platform identifier |
+|---|---|
+| Nordic nRF52840 DK | `zephyr/nrf52840dk_nrf52840` |
+| ESP32 (under Zephyr) | `zephyr/esp32` |
+| Any Zephyr board | `zephyr/<zephyr_board_name>` |
+
+Use the Zephyr board name exactly as it appears in the Zephyr board catalogue when constructing your platform identifier.
+
+## Supported features
+
+- **Ethernet networking** — TCP/IP stack via Zephyr's networking subsystem
+- **BLE central role** — scan for and connect to BLE peripherals
+- **File storage** — access the Zephyr file system (LittleFS, FAT)
+- **ESP32 targets** — run Moddable SDK on ESP32 under Zephyr instead of ESP-IDF
+
+## Prerequisites
+
+<Steps>
+  <Step title="Install the Moddable SDK tools">
+    Follow the [Getting Started guide](/getting-started) to install `mcconfig` and the Moddable toolchain before proceeding.
+  </Step>
+  <Step title="Install Zephyr and its dependencies">
+    Follow the official Zephyr getting-started guide at [https://docs.zephyrproject.org/latest/develop/getting_started/](https://docs.zephyrproject.org/latest/develop/getting_started/). This installs Python, `west`, and the Zephyr SDK bundle, which includes pre-built toolchains for ARM, RISC-V, Xtensa, and other architectures.
+  </Step>
+  <Step title="Install west">
+    `west` is Zephyr's meta-tool for building, flashing, and managing workspace repositories. It is installed as part of the Zephyr setup:
+
+    ```bash
+    pip install west
+    ```
+
+    Verify the installation:
+
+    ```bash
+    west --version
+    ```
+  </Step>
+  <Step title="Install the target toolchain">
+    The Zephyr SDK bundle covers most targets. If your board requires a toolchain not included in the bundle (for example, a vendor-specific Xtensa toolchain), install it separately and add it to your `PATH`.
+  </Step>
+  <Step title="Set environment variables">
+    Add the Zephyr base directory to your shell profile:
+
+    ```bash
+    export ZEPHYR_BASE=~/zephyrproject/zephyr
+    ```
+
+    Reload your profile or open a new terminal after saving. The `west` and Zephyr build scripts read `ZEPHYR_BASE` to locate kernel source and board definitions.
+  </Step>
+  <Step title="Connect the board">
+    Attach your target board via USB, JTAG probe, or the flashing interface supported by your hardware. Refer to the Zephyr documentation for your specific board.
+  </Step>
+</Steps>
+
+## Build and flash
+
+Pass the Zephyr board identifier as the subplatform to `mcconfig`:
+
+```bash
+# Nordic nRF52840 DK
+mcconfig -d -m -p zephyr/nrf52840dk_nrf52840
+
+# ESP32 target running under Zephyr
+mcconfig -d -m -p zephyr/esp32
+```
+
+`mcconfig` invokes `west build` internally, so the output artifacts and flash procedure follow standard Zephyr conventions. Flashing is triggered automatically at the end of a successful build using the flash runner configured for your board.
+
+<Note>
+  To flash manually or to use a specific runner (e.g., `openocd`, `jlink`, or `pyocd`), build first without the `-m` flag, then run `west flash --runner <runner>` from the build directory.
+</Note>
+
+## Zephyr vs. native ports
+
+The Zephyr port is a flexible fallback for any hardware without a dedicated Moddable SDK target. However, if your chip has a native port (ESP32 via ESP-IDF, nRF52 via nRF5 SDK), the native port typically offers better performance and deeper integration with the vendor SDK.
+
+| | Zephyr port | Native port |
+|---|---|---|
+| **Board coverage** | Any Zephyr board | Specific chips only |
+| **Setup complexity** | Higher (Zephyr + west) | Lower (one vendor SDK) |
+| **Feature coverage** | Ethernet, BLE central, storage | Full chip peripheral access |
+| **Recommended for** | Boards without native ports | ESP32, nRF52, Pico, ESP8266 |
+
+<Tip>
+  If you are targeting an nRF52840 or ESP32 and do not have a specific reason to use Zephyr, start with the [nRF52](/devices/nrf52) or [ESP32](/devices/esp32) native port instead. You will get a simpler setup and access to more hardware peripherals.
+</Tip>
+
+## Debugging with xsbug
+
+Run `mcconfig` with the `-d` flag to enable the xsbug connection. On Zephyr targets, xsbug typically communicates over the USB CDC ACM serial port. Open xsbug before the device boots to capture startup output and set breakpoints before your application code runs.
+
+<Warning>
+  Zephyr board support quality varies by vendor and community maintenance. If you encounter build failures for a specific board, check the Zephyr board catalogue and the Moddable SDK GitHub repository for known issues before filing a bug.
+</Warning>
